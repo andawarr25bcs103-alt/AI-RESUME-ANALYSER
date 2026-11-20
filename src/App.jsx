@@ -12,6 +12,7 @@ import ForgotPasswordPage from './modules/auth/ForgotPasswordPage';
 
 // Module 2: Resume Upload & Extraction
 import ResumeUploadPage from './modules/resume-upload/ResumeUploadPage';
+import StandaloneUploadApp from './modules/resume-upload/StandaloneUploadApp';
 
 // Module 3: AI Resume Parsing & Scoring
 import AiAnalysisPage from './modules/ai-analysis/AiAnalysisPage';
@@ -30,7 +31,28 @@ import DashboardPage from './modules/dashboard-reports/DashboardPage';
 import ReportsPage from './modules/dashboard-reports/ReportsPage';
 import LandingPage from './modules/dashboard-reports/LandingPage';
 
+/**
+ * ============================================================================
+ * MODULE 2 STANDALONE DEVELOPMENT CONFIGURATION
+ * ============================================================================
+ * Set to `true` to launch localhost directly into Module 2 (Resume Upload & Text Extraction)
+ * in strict isolation (without Dashboard, Login, or other modules).
+ *
+ * Set to `false` to restore the complete multi-module application shell and routing.
+ */
+const STANDALONE_MODULE_2 = true;
+
 function App() {
+  // Standalone Development Mode: Renders ONLY Module 2
+  if (STANDALONE_MODULE_2) {
+    return (
+      <AppProvider>
+        <StandaloneUploadApp />
+      </AppProvider>
+    );
+  }
+
+  // Full Multi-Module Application Shell (Preserved intact for team integration)
   return (
     <BrowserRouter>
       <AuthProvider>
