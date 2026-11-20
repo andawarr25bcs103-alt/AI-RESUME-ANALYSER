@@ -14,7 +14,7 @@ import ForgotPasswordPage from './modules/auth/ForgotPasswordPage';
 import ResumeUploadPage from './modules/resume-upload/ResumeUploadPage';
 
 // Module 3: AI Resume Parsing & Scoring
-import AiAnalysisPage from './modules/ai-analysis/AiAnalysisPage';
+import AIAnalysisPage, { AiAnalysisPage } from './modules/ai-analysis/AIAnalysisPage';
 
 // Module 4: Job Matching
 import JobMatchingPage from './modules/job-matching/JobMatchingPage';
@@ -30,7 +30,23 @@ import DashboardPage from './modules/dashboard-reports/DashboardPage';
 import ReportsPage from './modules/dashboard-reports/ReportsPage';
 import LandingPage from './modules/dashboard-reports/LandingPage';
 
+/**
+ * DEVELOPMENT ISOLATION FLAG
+ * When set to true: ONLY Module 3 – AI Resume Analysis is rendered on localhost.
+ * Set to false: Restores the full multi-module shared application routing.
+ */
+const ISOLATE_MODULE_3 = true;
+
 function App() {
+  // Standalone isolated development entry for Module 3 – AI Resume Analysis
+  if (ISOLATE_MODULE_3) {
+    return (
+      <AppProvider>
+        <AIAnalysisPage />
+      </AppProvider>
+    );
+  }
+
   return (
     <BrowserRouter>
       <AuthProvider>
