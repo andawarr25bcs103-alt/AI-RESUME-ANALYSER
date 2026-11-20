@@ -26,6 +26,7 @@ import SkillGapPage from './modules/skill-gap/SkillGapPage';
 import ImprovementSuggestionsPage from './modules/improvement-suggestions/ImprovementSuggestionsPage';
 
 // Module 7: Master Dashboard & Reports
+import DashboardReportPage from './modules/dashboard-report/DashboardReportPage';
 import DashboardPage from './modules/dashboard-reports/DashboardPage';
 import ReportsPage from './modules/dashboard-reports/ReportsPage';
 import LandingPage from './modules/dashboard-reports/LandingPage';
@@ -36,8 +37,12 @@ function App() {
       <AuthProvider>
         <AppProvider>
           <Routes>
-            {/* Public Routes */}
-            <Route path="/" element={<LandingPage />} />
+            {/* Isolated Entry for Module 7: Displays ONLY Module 7 on localhost */}
+            <Route path="/" element={<DashboardReportPage />} />
+            <Route path="/dashboard-report" element={<DashboardReportPage />} />
+
+            {/* Preserved Original Shared Application Routes */}
+            <Route path="/landing" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />

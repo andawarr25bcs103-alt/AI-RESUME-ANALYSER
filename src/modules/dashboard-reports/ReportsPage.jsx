@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   FileText,
   Printer,
+  Download,
   Sparkles,
   Award,
   AlertTriangle,
@@ -25,6 +26,8 @@ import {
   UserCheck
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
+import { generateResumePdfReport } from '../dashboard/pdfReportService';
 import Button from '../../components/Button';
 import PageHeader from '../../components/PageHeader';
 import EmptyState from '../../components/EmptyState';
@@ -41,10 +44,35 @@ export const ReportsPage = () => {
     resetAnalysis
   } = useApp();
 
+  const { currentUser } = useAuth();
   const navigate = useNavigate();
   const [copied, setCopied] = useState(false);
   const [copiedRewriteIndex, setCopiedRewriteIndex] = useState(null);
   const [viewMode, setViewMode] = useState('document'); // 'document' (Print Preview) | 'interactive'
+  const [isPdfGenerating, setIsPdfGenerating] = useState(false);
+
+  // Trigger jsPDF report generation and download
+  const handleDownloadJsPdf = async () => {
+    setIsPdfGenerating(true);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      generateResumePdfReport({
+        resumeFile,
+        resumeText,
+        analysisResults,
+        matchingResults,
+        skillAnalysisResults,
+        improvementSuggestions,
+        targetJobRole,
+        currentUser
+      });
+    } catch (err) {
+      console.error('jsPDF Error:', err);
+      alert('Failed to generate PDF report: ' + err.message);
+    } finally {
+      setIsPdfGenerating(false);
+    }
+  };
 
   // Trigger browser print dialog for Save as PDF
   const handlePrint = () => {
@@ -229,11 +257,21 @@ ${(skillAnalysisResults?.missingCriticalSkills || []).map((sk) => `• ${sk}`).j
 
               <Button
                 variant="primary"
+                icon={Download}
+                isLoading={isPdfGenerating}
+                onClick={handleDownloadJsPdf}
+                title="Download multi-page PDF generated via jsPDF"
+              >
+                {isPdfGenerating ? 'Generating PDF...' : 'Download jsPDF'}
+              </Button>
+
+              <Button
+                variant="outline"
                 icon={Printer}
                 onClick={handlePrint}
-                title="Print or Save as PDF"
+                title="Print or Save as PDF via browser"
               >
-                Download / Print PDF
+                Browser Print
               </Button>
             </div>
           }
