@@ -1,0 +1,78 @@
+/* ==========================================================================
+   RESUMATE AI - MODULE 1 AUTHENTICATION STYLES
+   Scoped styles for Login, Registration, and Forgot Password modules
+   ========================================================================== */
+
+.auth-form-card {
+  background: var(--color-surface, #FFFFFF);
+  border: 1px solid var(--color-border, #E2E8F0);
+  border-radius: var(--radius-lg, 14px);
+  padding: 32px 28px;
+  box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(15, 23, 42, 0.08));
+}
+
+.auth-form-checkbox-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: -6px;
+  margin-bottom: 16px;
+  font-size: var(--font-xs, 12px);
+  color: var(--color-text-secondary, #475569);
+}
+
+.auth-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: var(--font-xs, 12px);
+  color: var(--color-text-secondary, #475569);
+}
+
+.auth-checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary, #6366F1);
+  cursor: pointer;
+  border-radius: var(--radius-xs, 4px);
+}
+
+.auth-terms-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 20px;
+  font-size: var(--font-xs, 12px);
+  color: var(--color-text-secondary, #475569);
+  line-height: 1.4;
+}
+
+.auth-terms-row input[type="checkbox"] {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-primary, #6366F1);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.auth-terms-row a {
+  color: var(--color-primary, #6366F1);
+  font-weight: 500;
+  text-decoration: underline;
+}
+
+.auth-terms-row a:hover {
+  color: var(--color-primary-hover, #4F46E5);
+}
+
+.input-error {
+  border-color: var(--color-danger, #EF4444) !important;
+  box-shadow: 0 0 0 2px var(--color-danger-border, #FECACA) !important;
+}
+
+.auth-input-wrapper:focus-within .auth-input-icon {
+  color: var(--color-primary, #6366F1);
+}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   UploadCloud,
@@ -7,22 +7,46 @@ import {
   AlertCircle,
   Code2,
   Trash2,
-  Sparkles
+  Sparkles,
+  Info,
+  ShieldCheck,
+  FileWarning
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import Button from '../../components/Button';
 import PageHeader from '../../components/PageHeader';
 import Loader from '../../components/Loader';
+import FileDropzone from './FileDropzone';
+import FileMetadataCard from './FileMetadataCard';
+import TextPreviewCard from './TextPreviewCard';
+import {
+  extractResume,
+  validateResumeFile,
+  formatFileSize,
+  MAX_FILE_SIZE_BYTES
+} from './textExtractor';
 
 export const ResumeUploadPage = () => {
-  const { resumeText, resumeFile, setNewResume, resetAnalysis } = useApp();
+  const {
+    resumeText,
+    resumeFile,
+    setResumeText,
+    setResumeFile,
+    setNewResume,
+    resetAnalysis
+  } = useApp();
+
   const [dragActive, setDragActive] = useState(false);
-  const [manualText, setManualText] = useState(resumeText || '');
-  const [uploadError, setUploadError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [processingMessage, setProcessingMessage] = useState('Extracting resume content...');
+  const [uploadError, setUploadError] = useState('');
+  const [isScannedPdfError, setIsScannedPdfError] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+
+  const hiddenReplaceInputRef = useRef(null);
   const navigate = useNavigate();
 
-  // Handle Drag events
+  // Drag and drop event handlers
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -33,81 +57,158 @@ export const ResumeUploadPage = () => {
     }
   };
 
-  // Handle File Input Selection
-  const handleFileChange = async (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      await processSelectedFile(file);
-    }
-  };
-
   const handleDrop = async (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
+
     const file = e.dataTransfer?.files?.[0];
     if (file) {
-      await processSelectedFile(file);
+      await handleProcessFile(file);
     }
   };
 
-  /**
-   * File Parser Placeholder for Module 2 Team Member
-   * Note for Module 2: Implement PDF.js for .pdf and Mammoth for .docx extraction here!
-   */
-  const processSelectedFile = async (file) => {
+  // Main file processing & client-side extraction pipeline
+  const handleProcessFile = async (file) => {
     setUploadError('');
+    setIsScannedPdfError(false);
+    setSuccessMessage('');
+
+    // Pre-validation: Type and Size (Max 5 MB)
+    const validation = validateResumeFile(file);
+    if (!validation.isValid) {
+      setUploadError(validation.error);
+      return;
+    }
+
     setIsProcessing(true);
+    const isPdf = validation.fileType === 'pdf';
+    setProcessingMessage(
+      isPdf
+        ? 'Extracting selectable text from PDF using PDF.js...'
+        : 'Parsing Word document structure using Mammoth...'
+    );
 
     try {
-      const fileInfo = {
+      // Execute client-side extraction using pdfjs-dist or mammoth
+      const extraction = await extractResume(file);
+
+      const fileMetadata = {
         name: file.name,
         size: file.size,
-        type: file.type,
-        lastModified: file.lastModified
+        type: file.type || (isPdf ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+        fileType: extraction.fileType,
+        lastModified: file.lastModified,
+        extractedAt: new Date().toISOString(),
+        numPages: extraction.numPages || null,
+        wordCount: extraction.wordCount,
+        characterCount: extraction.characterCount
       };
 
-      if (file.type === 'text/plain') {
-        const text = await file.text();
-        setNewResume(fileInfo, text);
-        setManualText(text);
-      } else {
-        // Module 2 foundation placeholder:
-        // Reads file as text or placeholder extraction until PDF.js / Mammoth parser is hooked up
-        const simulatedExtractedText = `RESUME: ${file.name}\n\nCandidate details and extracted text from ${file.name} will appear here after PDF.js / Mammoth parses the binary stream.`;
-        setNewResume(fileInfo, simulatedExtractedText);
-        setManualText(simulatedExtractedText);
-      }
+      // Save extracted text & file metadata using shared AppContext setters
+      setResumeFile(fileMetadata);
+      setResumeText(extraction.text);
+
+      // Also invoke setNewResume to flush any stale analysis results in AppContext
+      setNewResume(fileMetadata, extraction.text);
+
+      setSuccessMessage(
+        `Resume successfully parsed! Extracted ${extraction.wordCount.toLocaleString()} words across ${extraction.numPages ? `${extraction.numPages} page(s)` : 'the document'
+        }.`
+      );
     } catch (err) {
-      setUploadError(`Failed to process file: ${err.message}`);
+      const errMsg = err.message || 'An unexpected error occurred while parsing the resume.';
+
+      // Check if error is due to scanned PDF requiring OCR
+      if (errMsg.includes('SCANNED_PDF')) {
+        setIsScannedPdfError(true);
+        setUploadError(errMsg.replace('SCANNED_PDF: ', ''));
+      } else {
+        setUploadError(errMsg);
+      }
     } finally {
       setIsProcessing(false);
     }
   };
 
-  const handleManualSave = () => {
-    if (!manualText.trim()) {
-      setUploadError('Please provide resume text or upload a document.');
-      return;
-    }
-    setNewResume(
-      { name: 'Manual_Resume_Input.txt', size: manualText.length, type: 'text/plain' },
-      manualText
-    );
+  // Remove File handler (Clears active file and text in state and AppContext)
+  const handleRemoveFile = () => {
+    resetAnalysis();
+    setResumeFile(null);
+    setResumeText('');
     setUploadError('');
+    setIsScannedPdfError(false);
+    setSuccessMessage('');
   };
 
-  const handleClear = () => {
-    resetAnalysis();
-    setManualText('');
-    setUploadError('');
+  // Clear Text handler (Clears extracted text while keeping file metadata)
+  const handleClearText = () => {
+    setResumeText('');
+    if (resumeFile) {
+      setResumeFile({
+        ...resumeFile,
+        wordCount: 0,
+        characterCount: 0
+      });
+    }
+  };
+
+  // Handle user edits in text preview
+  const handleSaveEditedText = (editedText) => {
+    if (!editedText.trim()) {
+      setUploadError('Resume text cannot be completely empty.');
+      return;
+    }
+
+    const words = editedText.trim().split(/\s+/).filter(Boolean).length;
+    const chars = editedText.length;
+
+    setResumeText(editedText);
+
+    // Update word count in file metadata if file is loaded
+    if (resumeFile) {
+      const updatedFile = {
+        ...resumeFile,
+        wordCount: words,
+        characterCount: chars
+      };
+      setResumeFile(updatedFile);
+    }
+  };
+
+  // Navigate to AI Analysis
+  const handleContinueToAnalysis = () => {
+    navigate('/ai-analysis');
+  };
+
+  // Trigger replacement file dialog
+  const handleTriggerReplace = () => {
+    if (hiddenReplaceInputRef.current) {
+      hiddenReplaceInputRef.current.click();
+    }
   };
 
   return (
     <div>
+      {/* Hidden file input for Replace action */}
+      <input
+        ref={hiddenReplaceInputRef}
+        type="file"
+        accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            handleProcessFile(file);
+          }
+          e.target.value = '';
+        }}
+      />
+
+      {/* Page Header */}
       <PageHeader
-        title="Resume Upload & Parser"
-        description="Upload candidate resume in PDF, DOCX, or TXT format. Extracted text will power all downstream AI modules."
+        title="Resume Upload & Text Extraction"
+        description="Upload your resume and extract its contents."
         badge="Module 2"
         icon={UploadCloud}
         actions={
@@ -115,156 +216,210 @@ export const ResumeUploadPage = () => {
             <Button
               variant="primary"
               icon={Sparkles}
-              onClick={() => navigate('/ai-analysis')}
+              onClick={handleContinueToAnalysis}
             >
-              Proceed to AI Analysis
+              Continue to AI Analysis
             </Button>
           ) : null
         }
       />
 
-      {uploadError && (
-        <div className="alert alert-danger">
-          <AlertCircle size={18} />
-          <span>{uploadError}</span>
+      {/* Success Notification Banner */}
+      {successMessage && (
+        <div
+          className="alert alert-success"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: '#ECFDF5',
+            borderColor: '#A7F3D0',
+            color: '#065F46'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <CheckCircle size={18} color="#059669" />
+            <span>{successMessage}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSuccessMessage('')}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: '#059669',
+              fontWeight: 700,
+              fontSize: '1rem'
+            }}
+          >
+            ✕
+          </button>
         </div>
       )}
 
-      {isProcessing && (
-        <Loader size="md" message="Reading and parsing resume document stream..." />
+      {/* Scanned PDF Warning Banner (OCR Out of Scope) */}
+      {isScannedPdfError && (
+        <div
+          className="alert alert-warning"
+          style={{
+            flexDirection: 'column',
+            gap: '8px',
+            backgroundColor: '#FFFBEB',
+            borderColor: '#FDE68A',
+            color: '#92400E'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontWeight: 600 }}>
+            <FileWarning size={20} color="#D97706" />
+            <span>Scanned PDF Detected (OCR Required)</span>
+          </div>
+          <p style={{ margin: 0, fontSize: '0.8125rem', lineHeight: '1.6' }}>
+            {uploadError}
+          </p>
+          <div style={{ marginTop: '4px', fontSize: '0.75rem', color: '#B45309' }}>
+            <strong>Recommendation:</strong> If your resume was created in Google Docs, Microsoft Word, Canva, or LinkedIn, export it as a standard digital PDF with selectable text, or upload the original DOCX file.
+          </div>
+        </div>
       )}
 
-      <div className="grid-2">
-        {/* Upload Dropzone */}
-        <div className="resumate-card">
-          <div className="card-header">
-            <h2 className="card-title">
-              <UploadCloud size={20} color="var(--color-primary)" />
-              Document Upload
-            </h2>
-            <span className="badge badge-primary">PDF / DOCX / TXT</span>
+      {/* Generic Error Banner */}
+      {uploadError && !isScannedPdfError && (
+        <div
+          className="alert alert-danger"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            backgroundColor: '#FEF2F2',
+            borderColor: '#FECACA',
+            color: '#991B1B'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <AlertCircle size={18} color="#DC2626" />
+            <span>{uploadError}</span>
           </div>
+          <button
+            type="button"
+            onClick={() => setUploadError('')}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: '#DC2626',
+              fontWeight: 700,
+              fontSize: '1rem'
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
-          <div
+      {/* Loading State Spinner */}
+      {isProcessing && (
+        <div style={{ margin: '24px 0' }}>
+          <Loader size="lg" message={processingMessage} />
+        </div>
+      )}
+
+      {/* Main Content Area */}
+      {!resumeFile && !resumeText ? (
+        /* Empty State: File Dropzone */
+        <div style={{ maxWidth: '840px', margin: '0 auto' }}>
+          <FileDropzone
+            onFileSelect={handleProcessFile}
+            isProcessing={isProcessing}
+            dragActive={dragActive}
             onDragEnter={handleDrag}
             onDragLeave={handleDrag}
             onDragOver={handleDrag}
             onDrop={handleDrop}
-            style={{
-              border: `2px dashed ${dragActive ? 'var(--color-primary)' : 'var(--color-border)'}`,
-              borderRadius: 'var(--radius-lg)',
-              padding: '40px 20px',
-              textAlign: 'center',
-              backgroundColor: dragActive ? 'var(--color-primary-light)' : 'var(--color-bg)',
-              transition: 'all var(--transition-fast)',
-              cursor: 'pointer'
-            }}
-            onClick={() => document.getElementById('resume-file-input').click()}
+          />
+
+          {/* Quick Informational Highlights */}
+          <div
+            className="grid-3"
+            style={{ marginTop: '28px' }}
           >
-            <input
-              id="resume-file-input"
-              type="file"
-              accept=".pdf,.docx,.doc,.txt"
-              style={{ display: 'none' }}
-              onChange={handleFileChange}
-            />
-
-            <div
-              style={{
-                width: '56px',
-                height: '56px',
-                borderRadius: '50%',
-                background: 'var(--gradient-subtle)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 16px auto',
-                color: 'var(--color-primary)'
-              }}
-            >
-              <UploadCloud size={28} />
-            </div>
-
-            <p style={{ fontWeight: 600, color: 'var(--color-text-main)', marginBottom: '4px' }}>
-              Drag & Drop your resume here, or <span style={{ color: 'var(--color-primary)' }}>Browse</span>
-            </p>
-            <p style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-muted)' }}>
-              Supports PDF, DOCX, and TXT up to 10MB
-            </p>
-          </div>
-
-          {resumeFile && (
-            <div
-              style={{
-                marginTop: '18px',
-                padding: '12px 16px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--color-success-bg)',
-                border: '1px solid var(--color-success-border)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <CheckCircle size={18} color="var(--color-success)" />
-                <div>
-                  <strong style={{ fontSize: 'var(--font-sm)', color: 'var(--color-text-main)' }}>
-                    {resumeFile.name}
-                  </strong>
-                  <div style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-secondary)' }}>
-                    {(resumeFile.size / 1024).toFixed(1)} KB • Loaded
-                  </div>
-                </div>
+            <div className="resumate-card" style={{ padding: '18px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <span className="badge badge-primary">PDF Extraction</span>
               </div>
-
-              <Button variant="ghost" size="sm" icon={Trash2} onClick={handleClear}>
-                Clear
-              </Button>
+              <h4 style={{ fontSize: '0.875rem', marginBottom: '4px' }}>Powered by PDF.js</h4>
+              <p style={{ fontSize: '0.75rem', margin: 0, color: 'var(--color-text-secondary, #64748B)' }}>
+                Parses vector text page by page with structural vertical spacing and glyph mapping.
+              </p>
             </div>
-          )}
-        </div>
 
-        {/* Text Area & Preview */}
-        <div className="resumate-card">
-          <div className="card-header">
-            <h2 className="card-title">
-              <FileText size={20} color="var(--color-primary)" />
-              Extracted Text Preview
-            </h2>
-            <span className="badge badge-secondary">
-              {resumeText ? `${resumeText.trim().split(/\s+/).length} Words` : 'Empty'}
-            </span>
+            <div className="resumate-card" style={{ padding: '18px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <span className="badge badge-secondary">DOCX Extraction</span>
+              </div>
+              <h4 style={{ fontSize: '0.875rem', marginBottom: '4px' }}>Powered by Mammoth</h4>
+              <p style={{ fontSize: '0.75rem', margin: 0, color: 'var(--color-text-secondary, #64748B)' }}>
+                Extracts clean text, paragraphs, and list items from Word OpenXML documents.
+              </p>
+            </div>
+
+            <div className="resumate-card" style={{ padding: '18px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <span className="badge badge-success">Zero Cloud Storage</span>
+              </div>
+              <h4 style={{ fontSize: '0.875rem', marginBottom: '4px' }}>100% Private</h4>
+              <p style={{ fontSize: '0.75rem', margin: 0, color: 'var(--color-text-secondary, #64748B)' }}>
+                No server uploads and zero localStorage retention. Extracted text remains in memory.
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* Active Resume State: Metadata & Preview Grid */
+        <div className="grid-2">
+          {/* Left Column: Metadata & Security */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <FileMetadataCard
+              fileData={resumeFile}
+              onRemove={handleRemoveFile}
+              onReplace={handleTriggerReplace}
+              onContinue={handleContinueToAnalysis}
+            />
+
+            {/* Privacy & Session Card */}
+            <div
+              className="resumate-card"
+              style={{
+                backgroundColor: 'var(--color-bg, #F8FAFC)',
+                border: '1px solid var(--color-border, #E2E8F0)',
+                padding: '20px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                <ShieldCheck size={18} color="var(--color-success, #10B981)" />
+                <h4 style={{ fontSize: '0.875rem', margin: 0 }}>Privacy &amp; In-Memory State</h4>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: 'var(--color-text-secondary, #64748B)', lineHeight: '1.6', margin: 0 }}>
+                The extracted text and file details are held securely in memory within <code>AppContext</code>.
+                When you refresh or close the tab, the in-memory state is cleared. You can proceed to AI Analysis or replace this resume anytime.
+              </p>
+            </div>
           </div>
 
-          <div className="form-group" style={{ marginBottom: '14px' }}>
-            <label className="form-label" htmlFor="manual-resume-text">
-              Parsed Resume Content (Editable)
-            </label>
-            <textarea
-              id="manual-resume-text"
-              rows={11}
-              className="form-textarea"
-              placeholder="Paste or review parsed resume text here..."
-              value={manualText}
-              onChange={(e) => setManualText(e.target.value)}
-              style={{ resize: 'vertical', fontSize: 'var(--font-xs)', lineHeight: '1.6' }}
+          {/* Right Column: Extracted Text Preview */}
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            <TextPreviewCard
+              text={resumeText}
+              onSaveText={handleSaveEditedText}
+              onClearText={handleClearText}
+              onContinue={handleContinueToAnalysis}
             />
           </div>
-
-          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
-            <Button variant="outline" size="sm" onClick={handleClear} disabled={!manualText}>
-              Reset
-            </Button>
-            <Button variant="primary" size="sm" onClick={handleManualSave} disabled={!manualText}>
-              Save to Shared State
-            </Button>
-          </div>
         </div>
-      </div>
+      )}
 
       {/* Developer & Team Integration Guidance Card */}
-      <div className="dev-guidance-card">
+      <div className="dev-guidance-card" style={{ marginTop: '36px' }}>
         <div className="dev-guidance-header">
           <span className="dev-guidance-title">
             <Code2 size={16} /> Module 2 Integration Contract
@@ -272,9 +427,18 @@ export const ResumeUploadPage = () => {
           <span className="badge badge-primary">Owner: Resume Upload Specialist</span>
         </div>
         <ul className="dev-guidance-list">
-          <li><strong>Role:</strong> Extract raw text from uploaded files using <code>pdfjs-dist</code> for PDFs and <code>mammoth</code> for DOCX files.</li>
-          <li><strong>Shared State Output:</strong> Calls <code>setNewResume(fileInfo, extractedText)</code> which automatically clears stale analysis via <code>resetAnalysis()</code>.</li>
-          <li><strong>Libraries:</strong> <code>pdfjs-dist</code>, <code>mammoth</code> are already installed in <code>package.json</code>.</li>
+          <li>
+            <strong>Role:</strong> Client-side text extraction using <code>pdfjs-dist</code> for PDFs and <code>mammoth</code> for DOCX files. Max file size: 5 MB.
+          </li>
+          <li>
+            <strong>Shared State Output:</strong> Sets <code>resumeText</code> and <code>resumeFile</code> in <code>AppContext</code> via <code>setNewResume</code>.
+          </li>
+          <li>
+            <strong>Downstream Integration:</strong> Module 3 (AI Analysis) and Module 4 (Job Matching) read directly from <code>AppContext.resumeText</code>.
+          </li>
+          <li>
+            <strong>Security:</strong> Zero server upload and zero localStorage storage. OCR for scanned images is documented out of scope.
+          </li>
         </ul>
       </div>
     </div>
