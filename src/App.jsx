@@ -1,8 +1,10 @@
 
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+
 import { AuthProvider } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
+
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -13,7 +15,6 @@ import ForgotPasswordPage from './modules/auth/ForgotPasswordPage';
 
 // Module 2: Resume Upload & Extraction
 import ResumeUploadPage from './modules/resume-upload/ResumeUploadPage';
-import StandaloneUploadApp from './modules/resume-upload/StandaloneUploadApp';
 
 // Module 3: AI Resume Analysis
 import AiAnalysisPage from './modules/ai-analysis/AiAnalysisPage';
@@ -25,7 +26,6 @@ import JobMatchingPage from './modules/job-matching/JobMatchingPage';
 import SkillGapPage from './modules/skill-gap/SkillGapPage';
 
 // Module 6: Improvement Suggestions
-import ImprovementSuggestionsPage from './modules/improvement-suggestions/ImprovementSuggestionsPage';
 import ResumeImprovementPage from './modules/resume-improvement/ResumeImprovementPage';
 
 // Module 7: Dashboard & Reports
@@ -33,31 +33,37 @@ import DashboardPage from './modules/dashboard-reports/DashboardPage';
 import ReportsPage from './modules/dashboard-reports/ReportsPage';
 import LandingPage from './modules/dashboard-reports/LandingPage';
 
-/**
+/*
+ * ============================================================================
  * DEVELOPMENT CONFIGURATION
+ * ============================================================================
  *
- * true  = Open Module 6 directly on localhost
- * false = Run the complete application with routing
+ * true  = Run ONLY Module 3 – AI Resume Analysis
+ * false = Run the complete multi-module application
+ *
  */
-const STANDALONE_MODULE_6 = true;
+
+const ISOLATE_MODULE_3 = true;
 
 function App() {
-  // Module 6 standalone development mode
-  if (STANDALONE_MODULE_6) {
+
+  // Module 3 Standalone Development Mode
+  if (ISOLATE_MODULE_3) {
     return (
       <AppProvider>
-        <ResumeImprovementPage />
+        <AiAnalysisPage />
       </AppProvider>
     );
   }
 
-  // Complete integrated application
+  // Complete Integrated Application
   return (
     <BrowserRouter>
       <AuthProvider>
         <AppProvider>
           <Routes>
-            {/* Landing page */}
+
+            {/* Landing Page */}
             <Route path="/" element={<LandingPage />} />
 
             {/* Authentication */}
@@ -68,7 +74,7 @@ function App() {
               element={<ForgotPasswordPage />}
             />
 
-            {/* Protected application routes */}
+            {/* Protected Application Routes */}
             <Route
               element={
                 <ProtectedRoute>
@@ -76,35 +82,55 @@ function App() {
                 </ProtectedRoute>
               }
             >
-              <Route path="/dashboard" element={<DashboardPage />} />
+              {/* Module 7: Dashboard */}
+              <Route
+                path="/dashboard"
+                element={<DashboardPage />}
+              />
+
+              {/* Module 2: Resume Upload */}
               <Route
                 path="/upload-resume"
                 element={<ResumeUploadPage />}
               />
+
+              {/* Module 3: AI Resume Analysis */}
               <Route
                 path="/ai-analysis"
                 element={<AiAnalysisPage />}
               />
+
+              {/* Module 4: Job Matching */}
               <Route
                 path="/job-matching"
                 element={<JobMatchingPage />}
               />
+
+              {/* Module 5: Skill Gap Analysis */}
               <Route
                 path="/skill-gap"
                 element={<SkillGapPage />}
               />
+
+              {/* Module 6: Resume Improvement */}
               <Route
                 path="/improvements"
                 element={<ResumeImprovementPage />}
               />
-              <Route path="/reports" element={<ReportsPage />} />
+
+              {/* Module 7: Reports */}
+              <Route
+                path="/reports"
+                element={<ReportsPage />}
+              />
             </Route>
 
-            {/* Unknown routes */}
+            {/* Unknown Routes */}
             <Route
               path="*"
               element={<Navigate to="/" replace />}
             />
+
           </Routes>
         </AppProvider>
       </AuthProvider>
