@@ -58,8 +58,9 @@ function App() {
       <AuthProvider>
         <AppProvider>
           <Routes>
-            {/* Public Routes */}
-            <Route path="/" element={<LandingPage />} />
+            {/* Module 5 Isolated Dev Entry: Display ONLY Skill Gap Analysis on localhost root */}
+            <Route path="/" element={<SkillGapPage standalone={true} />} />
+            <Route path="/landing" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
