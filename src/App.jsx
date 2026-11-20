@@ -1,7 +1,10 @@
+
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+
 import { AuthProvider } from './context/AuthContext';
 import { AppProvider } from './context/AppContext';
+
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -12,10 +15,9 @@ import ForgotPasswordPage from './modules/auth/ForgotPasswordPage';
 
 // Module 2: Resume Upload & Extraction
 import ResumeUploadPage from './modules/resume-upload/ResumeUploadPage';
-import StandaloneUploadApp from './modules/resume-upload/StandaloneUploadApp';
 
-// Module 3: AI Resume Parsing & Scoring
-import AIAnalysisPage, { AiAnalysisPage } from './modules/ai-analysis/AIAnalysisPage';
+// Module 3: AI Resume Analysis
+import AiAnalysisPage from './modules/ai-analysis/AiAnalysisPage';
 
 // Module 4: Job Matching
 import JobMatchingPage from './modules/job-matching/JobMatchingPage';
@@ -24,63 +26,55 @@ import JobMatchingPage from './modules/job-matching/JobMatchingPage';
 import SkillGapPage from './modules/skill-gap/SkillGapPage';
 
 // Module 6: Improvement Suggestions
-import ImprovementSuggestionsPage from './modules/improvement-suggestions/ImprovementSuggestionsPage';
+import ResumeImprovementPage from './modules/resume-improvement/ResumeImprovementPage';
 
-// Module 7: Master Dashboard & Reports
+// Module 7: Dashboard & Reports
 import DashboardPage from './modules/dashboard-reports/DashboardPage';
 import ReportsPage from './modules/dashboard-reports/ReportsPage';
 import LandingPage from './modules/dashboard-reports/LandingPage';
 
-/**
-
 /*
  * ============================================================================
- * MODULE 3 – STANDALONE DEVELOPMENT CONFIGURATION
+ * DEVELOPMENT CONFIGURATION
  * ============================================================================
- * Set to true: Launches only Module 3 – AI Resume Analysis on localhost.
- * Set to false: Restores the complete multi-module application routing.
+ *
+ * true  = Run ONLY Module 3 – AI Resume Analysis
+ * false = Run the complete multi-module application
+ *
  */
 
 const ISOLATE_MODULE_3 = true;
 
 function App() {
-  // Standalone isolated development entry for Module 3
+
+  // Module 3 Standalone Development Mode
   if (ISOLATE_MODULE_3) {
     return (
       <AppProvider>
-        <AIAnalysisPage />
+        <AiAnalysisPage />
       </AppProvider>
     );
   }
 
-  // Full application routing
-  return (
-    <AppProvider>
-      <MainApp />
-    </AppProvider>
-  );
-}
-
-export default App;
-
-      </AppProvider>
-    );
-  }
-
-
+  // Complete Integrated Application
   return (
     <BrowserRouter>
       <AuthProvider>
         <AppProvider>
           <Routes>
-            {/* Module 5 Isolated Dev Entry: Display ONLY Skill Gap Analysis on localhost root */}
-            <Route path="/" element={<SkillGapPage standalone={true} />} />
-            <Route path="/landing" element={<LandingPage />} />
+
+            {/* Landing Page */}
+            <Route path="/" element={<LandingPage />} />
+
+            {/* Authentication */}
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
-            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route
+              path="/forgot-password"
+              element={<ForgotPasswordPage />}
+            />
 
-            {/* Authenticated Application Shell (With Navbar & Sidebar Layout) */}
+            {/* Protected Application Routes */}
             <Route
               element={
                 <ProtectedRoute>
@@ -88,17 +82,55 @@ export default App;
                 </ProtectedRoute>
               }
             >
-              <Route path="/dashboard" element={<DashboardPage />} />
-              <Route path="/upload-resume" element={<ResumeUploadPage />} />
-              <Route path="/ai-analysis" element={<AiAnalysisPage />} />
-              <Route path="/job-matching" element={<JobMatchingPage />} />
-              <Route path="/skill-gap" element={<SkillGapPage />} />
-              <Route path="/improvements" element={<ImprovementSuggestionsPage />} />
-              <Route path="/reports" element={<ReportsPage />} />
+              {/* Module 7: Dashboard */}
+              <Route
+                path="/dashboard"
+                element={<DashboardPage />}
+              />
+
+              {/* Module 2: Resume Upload */}
+              <Route
+                path="/upload-resume"
+                element={<ResumeUploadPage />}
+              />
+
+              {/* Module 3: AI Resume Analysis */}
+              <Route
+                path="/ai-analysis"
+                element={<AiAnalysisPage />}
+              />
+
+              {/* Module 4: Job Matching */}
+              <Route
+                path="/job-matching"
+                element={<JobMatchingPage />}
+              />
+
+              {/* Module 5: Skill Gap Analysis */}
+              <Route
+                path="/skill-gap"
+                element={<SkillGapPage />}
+              />
+
+              {/* Module 6: Resume Improvement */}
+              <Route
+                path="/improvements"
+                element={<ResumeImprovementPage />}
+              />
+
+              {/* Module 7: Reports */}
+              <Route
+                path="/reports"
+                element={<ReportsPage />}
+              />
             </Route>
 
-            {/* Fallback Catch-all Route */}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            {/* Unknown Routes */}
+            <Route
+              path="*"
+              element={<Navigate to="/" replace />}
+            />
+
           </Routes>
         </AppProvider>
       </AuthProvider>
