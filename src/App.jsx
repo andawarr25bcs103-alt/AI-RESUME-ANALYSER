@@ -12,6 +12,7 @@ import ForgotPasswordPage from './modules/auth/ForgotPasswordPage';
 
 // Module 2: Resume Upload & Extraction
 import ResumeUploadPage from './modules/resume-upload/ResumeUploadPage';
+import StandaloneUploadApp from './modules/resume-upload/StandaloneUploadApp';
 
 // Module 3: AI Resume Parsing & Scoring
 import AIAnalysisPage, { AiAnalysisPage } from './modules/ai-analysis/AIAnalysisPage';
@@ -31,14 +32,19 @@ import ReportsPage from './modules/dashboard-reports/ReportsPage';
 import LandingPage from './modules/dashboard-reports/LandingPage';
 
 /**
- * DEVELOPMENT ISOLATION FLAG
- * When set to true: ONLY Module 3 – AI Resume Analysis is rendered on localhost.
- * Set to false: Restores the full multi-module shared application routing.
+
+/*
+ * ============================================================================
+ * MODULE 3 – STANDALONE DEVELOPMENT CONFIGURATION
+ * ============================================================================
+ * Set to true: Launches only Module 3 – AI Resume Analysis on localhost.
+ * Set to false: Restores the complete multi-module application routing.
  */
+
 const ISOLATE_MODULE_3 = true;
 
 function App() {
-  // Standalone isolated development entry for Module 3 – AI Resume Analysis
+  // Standalone isolated development entry for Module 3
   if (ISOLATE_MODULE_3) {
     return (
       <AppProvider>
@@ -47,13 +53,29 @@ function App() {
     );
   }
 
+  // Full application routing
+  return (
+    <AppProvider>
+      <MainApp />
+    </AppProvider>
+  );
+}
+
+export default App;
+
+      </AppProvider>
+    );
+  }
+
+
   return (
     <BrowserRouter>
       <AuthProvider>
         <AppProvider>
           <Routes>
-            {/* Public Routes */}
-            <Route path="/" element={<LandingPage />} />
+            {/* Module 5 Isolated Dev Entry: Display ONLY Skill Gap Analysis on localhost root */}
+            <Route path="/" element={<SkillGapPage standalone={true} />} />
+            <Route path="/landing" element={<LandingPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
