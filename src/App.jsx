@@ -24,6 +24,7 @@ import SkillGapPage from './modules/skill-gap/SkillGapPage';
 
 // Module 6: Improvement Suggestions
 import ImprovementSuggestionsPage from './modules/improvement-suggestions/ImprovementSuggestionsPage';
+import ResumeImprovementPage from './modules/resume-improvement/ResumeImprovementPage';
 
 // Module 7: Master Dashboard & Reports
 import DashboardPage from './modules/dashboard-reports/DashboardPage';
@@ -36,8 +37,8 @@ function App() {
       <AuthProvider>
         <AppProvider>
           <Routes>
-            {/* Public Routes */}
-            <Route path="/" element={<LandingPage />} />
+            {/* Module 6 Localhost Isolation Entry: When localhost opens, displays ONLY Module 6 */}
+            <Route path="/" element={<ResumeImprovementPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
@@ -55,7 +56,7 @@ function App() {
               <Route path="/ai-analysis" element={<AiAnalysisPage />} />
               <Route path="/job-matching" element={<JobMatchingPage />} />
               <Route path="/skill-gap" element={<SkillGapPage />} />
-              <Route path="/improvements" element={<ImprovementSuggestionsPage />} />
+              <Route path="/improvements" element={<ResumeImprovementPage />} />
               <Route path="/reports" element={<ReportsPage />} />
             </Route>
 
