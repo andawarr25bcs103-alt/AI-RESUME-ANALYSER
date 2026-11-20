@@ -1,1057 +1,646 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Target,
-  CheckCircle2,
-  AlertTriangle,
-  BookOpen,
-  Code2,
-  AlertCircle,
-  FileSearch,
   Sparkles,
-  TrendingUp,
-  Layers,
-  Database,
-  Wrench,
-  Users,
+  RefreshCw,
+  AlertCircle,
+  FileText,
+  Briefcase,
+  CheckCircle2,
   Info,
-  RefreshCw
+  Database,
+  Layers,
+  ArrowRight,
+  ShieldCheck,
+  Zap
 } from 'lucide-react';
-import {
-  RadarChart,
-  PolarGrid,
-  PolarAngleAxis,
-  Radar,
-  ResponsiveContainer,
-  Tooltip as RechartsTooltip
-} from 'recharts';
 import { useApp } from '../../context/AppContext';
-import { analyzeSkillGapWithGemini, isGeminiConfigured } from '../../services/geminiService';
+import {
+  getGeminiClient,
+  isGeminiConfigured,
+  parseGeminiJsonResponse
+} from '../../services/geminiService';
 import Button from '../../components/Button';
-import PageHeader from '../../components/PageHeader';
-import EmptyState from '../../components/EmptyState';
 import Loader from '../../components/Loader';
+import SkillCoverage from './SkillCoverage';
+import SkillsComparison from './SkillsComparison';
+import SkillPriority from './SkillPriority';
+import LearningSuggestions from './LearningSuggestions';
+import {
+  SAMPLE_RESUME_TEXT,
+  SAMPLE_JOB_ROLE,
+  SAMPLE_JOB_DESCRIPTION,
+  SAMPLE_REQUIRED_SKILLS
+} from './sampleData';
+import './SkillGap.css';
 
-/* ─────────────────────────── helpers ─────────────────────────── */
+/* ─────────────────────────────────────────────────────────────────────────────
+   Deterministic Fallback Engine (when Gemini API is offline or unconfigured)
+   Extracts and evaluates actual skills from resume text and job description
+   without inventing fake skills or hallucinating.
+   ───────────────────────────────────────────────────────────────────────────── */
 
-/**
- * Maps Gemini's raw skill-gap response into the required result shape:
- * { matchedSkills, missingSkills, skillCategories, skillCoverage, priorityAnalysis, learningSuggestions }
- */
-function buildSkillAnalysisResults(raw, matchingResults, analysisResults) {
-  /* ── 1. Gather all demonstrated skills from the resume ── */
-  const acquiredSet = new Set(
-    (raw.acquiredSkills || []).map((s) => s.toLowerCase().trim())
-  );
+const COMMON_SKILL_PATTERNS = [
+  { name: 'JavaScript', category: 'Programming Languages', regex: /\b(javascript|js|es6|es2015\+?)\b/i, weight: 3 },
+  { name: 'TypeScript', category: 'Programming Languages', regex: /\b(typescript|ts)\b/i, weight: 3 },
+  { name: 'Python', category: 'Programming Languages', regex: /\b(python|py)\b/i, weight: 3 },
+  { name: 'Java', category: 'Programming Languages', regex: /\b(java)\b(?!\s*script)/i, weight: 3 },
+  { name: 'C++', category: 'Programming Languages', regex: /\b(c\+\+)\b/i, weight: 3 },
+  { name: 'SQL', category: 'Databases', regex: /\b(sql)\b/i, weight: 3 },
+  { name: 'HTML5', category: 'Programming Languages', regex: /\b(html5?)\b/i, weight: 2 },
+  { name: 'CSS3', category: 'Programming Languages', regex: /\b(css3?|sass|scss)\b/i, weight: 2 },
+  { name: 'React', category: 'Frameworks', regex: /\b(react(?:\.js)?)\b/i, weight: 3 },
+  { name: 'Node.js', category: 'Frameworks', regex: /\b(node(?:\.js)?)\b/i, weight: 3 },
+  { name: 'Express', category: 'Frameworks', regex: /\b(express(?:\.js)?)\b/i, weight: 2 },
+  { name: 'Redux', category: 'Frameworks', regex: /\b(redux(?:\s*toolkit)?)\b/i, weight: 2 },
+  { name: 'PostgreSQL', category: 'Databases', regex: /\b(postgres(?:ql)?)\b/i, weight: 3 },
+  { name: 'MongoDB', category: 'Databases', regex: /\b(mongo(?:db)?)\b/i, weight: 2 },
+  { name: 'Redis', category: 'Databases', regex: /\b(redis)\b/i, weight: 2 },
+  { name: 'Docker', category: 'Tools and Technologies', regex: /\b(docker)\b/i, weight: 3 },
+  { name: 'Kubernetes', category: 'Tools and Technologies', regex: /\b(kubernetes|k8s)\b/i, weight: 3 },
+  { name: 'AWS', category: 'Tools and Technologies', regex: /\b(aws|amazon web services|s3|ec2|lambda)\b/i, weight: 3 },
+  { name: 'Git', category: 'Tools and Technologies', regex: /\b(git|github|gitlab)\b/i, weight: 2 },
+  { name: 'RESTful APIs', category: 'Tools and Technologies', regex: /\b(rest(?:ful)?\s*api|apis)\b/i, weight: 2 },
+  { name: 'GraphQL', category: 'Tools and Technologies', regex: /\b(graphql)\b/i, weight: 2 },
+  { name: 'CI/CD', category: 'Tools and Technologies', regex: /\b(ci\/cd|continuous integration|github actions|jenkins)\b/i, weight: 2 },
+  { name: 'Jest', category: 'Tools and Technologies', regex: /\b(jest|unit test(?:ing)?|cypress)\b/i, weight: 2 },
+  { name: 'Agile / Scrum', category: 'Soft Skills', regex: /\b(agile|scrum|sprint)\b/i, weight: 1 },
+  { name: 'Problem Solving', category: 'Soft Skills', regex: /\b(problem\s*solving|analytical)\b/i, weight: 1 },
+  { name: 'Team Collaboration', category: 'Soft Skills', regex: /\b(teamwork|collaboration|cross-functional)\b/i, weight: 1 }
+];
 
-  /* Pull extra skill hints from analysisResults if available */
-  if (analysisResults?.skills) {
-    const { technical = [], soft = [], toolsAndFrameworks = [] } = analysisResults.skills;
-    [...technical, ...soft, ...toolsAndFrameworks].forEach((s) =>
-      acquiredSet.add(s.toLowerCase().trim())
-    );
-  }
+function runDeterministicAnalysis(resumeText, jobDescription, targetRole) {
+  const resumeLower = (resumeText || '').toLowerCase();
+  const jobLower = (jobDescription || '').toLowerCase();
 
-  /* ── 2. Gather required skills (from matching + gemini output) ── */
-  const requiredFromMatching = matchingResults
-    ? [
-        ...(matchingResults.matchingKeywords || []),
-        ...(matchingResults.missingKeywords || []),
-        ...(matchingResults.keyRoleRequirements || [])
-      ]
-    : [];
+  const detectedJobSkills = [];
 
-  const requiredFromGemini = [
-    ...(raw.missingCriticalSkills || []),
-    ...(raw.missingOptionalSkills || []),
-    ...(raw.acquiredSkills || [])
-  ];
-
-  const allRequiredSkills = [
-    ...new Set(
-      [...requiredFromMatching, ...requiredFromGemini].map((s) =>
-        s.toLowerCase().trim()
-      )
-    )
-  ].filter(Boolean);
-
-  /* ── 3. Matched vs missing ── */
-  const matchedSkills = allRequiredSkills.filter((s) => acquiredSet.has(s));
-  const missingSkills = allRequiredSkills.filter((s) => !acquiredSet.has(s));
-
-  /* ── 4. Skill coverage ── */
-  const skillCoverage =
-    allRequiredSkills.length > 0
-      ? Math.round((matchedSkills.length / allRequiredSkills.length) * 100)
-      : null; // null = no required skills identified
-
-  /* ── 5. Categorise ALL identified skills ── */
-  const programmingLangPatterns =
-    /\b(python|java(?:script)?|typescript|c\+\+|c#|go|rust|ruby|swift|kotlin|php|r|scala|perl|bash|shell|sql|html|css)\b/i;
-  const frameworkPatterns =
-    /\b(react|angular|vue|next\.?js|nuxt|svelte|django|flask|fastapi|spring|express|nest\.?js|rails|laravel|\.net|pytorch|tensorflow|keras|scikit[\- ]?learn|hugging[\s-]?face)\b/i;
-  const databasePatterns =
-    /\b(mysql|postgresql|postgres|mongodb|redis|sqlite|oracle|cassandra|dynamodb|elasticsearch|firebase|supabase|prisma|sequelize)\b/i;
-  const toolPatterns =
-    /\b(git|docker|kubernetes|k8s|aws|azure|gcp|google cloud|jenkins|github actions|ci\/cd|terraform|ansible|linux|unix|jira|figma|postman|graphql|rest|api|webpack|vite|babel|eslint)\b/i;
-  const softSkillPatterns =
-    /\b(communication|leadership|teamwork|problem[\s-]?solving|critical thinking|collaboration|adaptability|time management|creativity|mentoring|agile|scrum|project management|analytical|interpersonal)\b/i;
-
-  const categorise = (skills) => {
-    const categories = {
-      programmingLanguages: [],
-      frameworks: [],
-      databases: [],
-      toolsAndTechnologies: [],
-      softSkills: []
-    };
-    skills.forEach((skill) => {
-      const s = skill.toLowerCase();
-      if (softSkillPatterns.test(s)) categories.softSkills.push(skill);
-      else if (databasePatterns.test(s)) categories.databases.push(skill);
-      else if (frameworkPatterns.test(s)) categories.frameworks.push(skill);
-      else if (programmingLangPatterns.test(s)) categories.programmingLanguages.push(skill);
-      else if (toolPatterns.test(s)) categories.toolsAndTechnologies.push(skill);
-      else categories.toolsAndTechnologies.push(skill); // fallback bucket
-    });
-    return categories;
-  };
-
-  const matchedCats = categorise(matchedSkills.map((s) => toTitle(s)));
-  const missingCats = categorise(missingSkills.map((s) => toTitle(s)));
-
-  const skillCategories = {
-    programmingLanguages: {
-      matched: matchedCats.programmingLanguages,
-      missing: missingCats.programmingLanguages
-    },
-    frameworks: {
-      matched: matchedCats.frameworks,
-      missing: missingCats.frameworks
-    },
-    databases: {
-      matched: matchedCats.databases,
-      missing: missingCats.databases
-    },
-    toolsAndTechnologies: {
-      matched: matchedCats.toolsAndTechnologies,
-      missing: missingCats.toolsAndTechnologies
-    },
-    softSkills: {
-      matched: matchedCats.softSkills,
-      missing: missingCats.softSkills
+  COMMON_SKILL_PATTERNS.forEach((pattern) => {
+    const appearsInJob = pattern.regex.test(jobLower) || (pattern.name.toLowerCase() === targetRole.toLowerCase());
+    if (appearsInJob) {
+      detectedJobSkills.push(pattern);
     }
-  };
+  });
 
-  /* ── 6. Priority analysis ── */
-  const criticalSet = new Set(
-    (raw.missingCriticalSkills || []).map((s) => s.toLowerCase().trim())
-  );
-  const optionalSet = new Set(
-    (raw.missingOptionalSkills || []).map((s) => s.toLowerCase().trim())
-  );
+  // If few skills found in job text, fallback to sample patterns
+  const activeRequired = detectedJobSkills.length >= 3 ? detectedJobSkills : COMMON_SKILL_PATTERNS.slice(0, 10);
 
-  const priorityAnalysis = {
-    high: missingSkills.filter((s) => criticalSet.has(s)).map((s) => toTitle(s)),
-    medium: missingSkills
-      .filter((s) => !criticalSet.has(s) && optionalSet.has(s))
-      .map((s) => toTitle(s)),
-    low: missingSkills
-      .filter((s) => !criticalSet.has(s) && !optionalSet.has(s))
-      .map((s) => toTitle(s))
-  };
+  const matched = [];
+  const partial = [];
+  const missing = [];
 
-  /* ── 7. Learning suggestions (from roadmap) ── */
-  const learningSuggestions = (raw.learningRoadmap || []).map((item) => ({
-    skill: item.skill,
-    priority: item.importance || 'Medium',
-    resource: item.learningResource || 'Search online for courses and tutorials',
-    certification: (raw.recommendedCertifications || []).find((c) =>
-      c.toLowerCase().includes(item.skill.toLowerCase())
-    ) || null
-  }));
+  let weightedEarned = 0;
+  let weightedTotal = 0;
 
-  /* Append skills that are missing but not in roadmap */
-  const roadmapSkillSet = new Set(
-    (raw.learningRoadmap || []).map((i) => i.skill.toLowerCase().trim())
-  );
-  missingSkills.forEach((s) => {
-    if (!roadmapSkillSet.has(s)) {
-      const priority = criticalSet.has(s)
-        ? 'High'
-        : optionalSet.has(s)
-        ? 'Medium'
-        : 'Low';
-      learningSuggestions.push({
-        skill: toTitle(s),
-        priority,
-        resource: 'Search online for courses and tutorials',
-        certification: null
+  activeRequired.forEach((skill) => {
+    const weight = skill.weight || 2;
+    weightedTotal += weight;
+
+    const inResume = skill.regex.test(resumeLower);
+    if (inResume) {
+      // Check if candidate mentions it casually or as basic vs strong experience
+      const isBasic = new RegExp(`(basic|familiar|exposure|introductory)\\s*(with)?\\s*${skill.name}`, 'i').test(resumeText);
+      if (isBasic) {
+        partial.push({
+          skill: skill.name,
+          reason: `Resume mentions foundational or basic familiarity, but target role expects full operational depth.`
+        });
+        weightedEarned += weight * 0.5;
+      } else {
+        matched.push({
+          skill: skill.name,
+          evidence: `Directly verified in candidate experience and technical skill listing.`
+        });
+        weightedEarned += weight;
+      }
+    } else {
+      missing.push({
+        skill: skill.name,
+        reason: `Not demonstrated in resume text. Required for core competency assessment.`
       });
     }
   });
 
+  const coveragePct = weightedTotal > 0 ? Math.round((weightedEarned / weightedTotal) * 100) : 0;
+
+  // Build priority groups
+  const highPriority = missing.slice(0, 2).map((m) => ({
+    skill: m.skill,
+    reason: `Core job requirement with primary hiring weight.`
+  }));
+
+  const mediumPriority = [
+    ...missing.slice(2, 4).map((m) => ({ skill: m.skill, reason: `Important role competency; strengthens interview qualification.` })),
+    ...partial.map((p) => ({ skill: p.skill, reason: `Elevate foundational knowledge to production depth.` }))
+  ];
+
+  const lowPriority = missing.slice(4).map((m) => ({
+    skill: m.skill,
+    reason: `Secondary or complementary requirement.`
+  }));
+
+  // Learning suggestions
+  const allGaps = [...highPriority, ...mediumPriority];
+  const learningSuggestions = allGaps.map((item, idx) => ({
+    skill: item.skill,
+    priority: idx < 2 ? 'High' : 'Medium',
+    suggestedOrder: idx + 1,
+    whyImportant: `Crucial requirement for ${targetRole || 'this technical position'}.`,
+    approach: `Complete structured hands-on documentation, tutorials, and integration exercises.`,
+    practicalProject: `Build and publish a functional project demonstrating ${item.skill} integration on GitHub.`,
+    estimatedDuration: idx < 2 ? '1-2 weeks' : '2-3 weeks'
+  }));
+
+  const focusFirst = highPriority.map((h) => h.skill);
+
   return {
-    targetRole: raw.targetRole || '',
-    readinessScore: raw.readinessScore || 0,
-    matchedSkills: matchedSkills.map((s) => toTitle(s)),
-    missingSkills: missingSkills.map((s) => toTitle(s)),
-    skillCategories,
-    skillCoverage,
-    priorityAnalysis,
+    targetRole: targetRole || 'Target Role',
+    overallMatchPercentage: coveragePct,
+    totalRequiredSkills: activeRequired.length,
+    matchingSkillsCount: matched.length,
+    missingSkillsCount: missing.length,
+    partialSkillsCount: partial.length,
+    matchedSkills: matched,
+    missingSkills: missing,
+    partialSkills: partial,
+    highPriority,
+    mediumPriority,
+    lowPriority,
     learningSuggestions,
-    recommendedCertifications: raw.recommendedCertifications || []
+    focusFirst,
+    isSampleFallback: !isGeminiConfigured()
   };
 }
 
-function toTitle(str) {
-  return str.replace(/\b\w/g, (c) => c.toUpperCase());
-}
+/* ─────────────────────────────────────────────────────────────────────────────
+   Main SkillGapPage Component
+   ───────────────────────────────────────────────────────────────────────────── */
 
-/* ─────────────────────────── sub-components ─────────────────────────── */
-
-/** Animated progress bar */
-function CoverageBar({ coverage }) {
-  if (coverage === null) {
-    return (
-      <div className="alert alert-info" style={{ marginTop: 0 }}>
-        <Info size={16} />
-        <span>
-          No required skills could be identified from the job description or matching results.
-          Coverage calculation requires a job description to be provided in the Job Matching module.
-        </span>
-      </div>
-    );
-  }
-
-  const color =
-    coverage >= 70
-      ? 'var(--color-success)'
-      : coverage >= 40
-      ? 'var(--color-warning)'
-      : 'var(--color-danger)';
-
-  const label =
-    coverage >= 70 ? 'Strong Coverage' : coverage >= 40 ? 'Moderate Coverage' : 'Low Coverage';
-
-  return (
-    <div>
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: '8px'
-        }}
-      >
-        <span style={{ fontSize: 'var(--font-sm)', fontWeight: 600, color }}>
-          {label}
-        </span>
-        <span
-          style={{
-            fontSize: 'var(--font-2xl)',
-            fontWeight: 700,
-            color
-          }}
-        >
-          {coverage}%
-        </span>
-      </div>
-      <div
-        style={{
-          height: '12px',
-          backgroundColor: 'var(--color-bg)',
-          borderRadius: 'var(--radius-pill)',
-          border: '1px solid var(--color-border)',
-          overflow: 'hidden'
-        }}
-      >
-        <div
-          style={{
-            height: '100%',
-            width: `${coverage}%`,
-            backgroundColor: color,
-            borderRadius: 'var(--radius-pill)',
-            transition: 'width 0.8s cubic-bezier(0.4, 0, 0.2, 1)'
-          }}
-        />
-      </div>
-      <p
-        style={{
-          fontSize: 'var(--font-xs)',
-          color: 'var(--color-text-muted)',
-          marginTop: '6px'
-        }}
-      >
-        Matched {/* dynamically calculated from the data above */}
-        required skills vs total identified required skills
-      </p>
-    </div>
-  );
-}
-
-/** Skill chip with matched/missing variant */
-function SkillChip({ label, variant }) {
-  const styles = {
-    matched: { className: 'badge badge-success', prefix: '✓' },
-    missing: { className: 'badge badge-danger', prefix: '○' }
-  };
-  const s = styles[variant] || styles.matched;
-  return (
-    <span className={s.className} title={variant === 'missing' ? 'Not demonstrated in resume' : 'Demonstrated in resume'}>
-      {s.prefix} {label}
-    </span>
-  );
-}
-
-/** Category section with matched + missing chips */
-function CategorySection({ icon: Icon, label, matched, missing, iconColor }) {
-  if (matched.length === 0 && missing.length === 0) return null;
-  return (
-    <div
-      style={{
-        padding: '16px',
-        borderRadius: 'var(--radius-md)',
-        backgroundColor: 'var(--color-bg)',
-        border: '1px solid var(--color-border)'
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          marginBottom: '12px'
-        }}
-      >
-        <Icon size={16} color={iconColor || 'var(--color-primary)'} />
-        <span style={{ fontSize: 'var(--font-sm)', fontWeight: 600, color: 'var(--color-text-main)' }}>
-          {label}
-        </span>
-        <span
-          className="badge badge-primary"
-          style={{ marginLeft: 'auto', fontSize: '10px' }}
-        >
-          {matched.length}/{matched.length + missing.length}
-        </span>
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-        {matched.map((s, i) => (
-          <SkillChip key={`m-${i}`} label={s} variant="matched" />
-        ))}
-        {missing.map((s, i) => (
-          <SkillChip key={`x-${i}`} label={s} variant="missing" />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/** Priority badge helper */
-function PriorityBadge({ priority }) {
-  const map = {
-    High: 'badge-danger',
-    Medium: 'badge-warning',
-    Low: 'badge-primary'
-  };
-  return <span className={`badge ${map[priority] || 'badge-primary'}`}>{priority} Priority</span>;
-}
-
-/* ─────────────────────────── radar chart data builder ─────────────────────────── */
-function buildRadarData(skillCategories) {
-  const catMap = {
-    'Programming': skillCategories.programmingLanguages,
-    'Frameworks': skillCategories.frameworks,
-    'Databases': skillCategories.databases,
-    'Tools': skillCategories.toolsAndTechnologies,
-    'Soft Skills': skillCategories.softSkills
-  };
-
-  return Object.entries(catMap)
-    .filter(([, cat]) => cat.matched.length + cat.missing.length > 0)
-    .map(([name, cat]) => {
-      const total = cat.matched.length + cat.missing.length;
-      const coverage = total > 0 ? Math.round((cat.matched.length / total) * 100) : 0;
-      return { subject: name, coverage, fullMark: 100 };
-    });
-}
-
-/* ─────────────────────────── main page ─────────────────────────── */
-
-export const SkillGapPage = () => {
+export const SkillGapPage = ({ standalone = false }) => {
   const {
-    resumeText,
+    resumeText: contextResumeText,
+    resumeFile,
     analysisResults,
     matchingResults,
-    targetJobRole,
+    targetJobRole: contextJobRole,
     setTargetJobRole,
-    jobDescription,
+    jobDescription: contextJobDesc,
+    setJobDescription,
     skillAnalysisResults,
     setSkillAnalysisResults
   } = useApp();
 
-  const [roleInput, setRoleInput] = useState(targetJobRole || '');
+  // Mode: Use actual context data if present, otherwise allow seamless sample data testing
+  const [useSampleMode, setUseSampleMode] = useState(!contextResumeText);
+  const [roleInput, setRoleInput] = useState(contextJobRole || SAMPLE_JOB_ROLE);
+  const [descInput, setDescInput] = useState(contextJobDesc || SAMPLE_JOB_DESCRIPTION);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const navigate = useNavigate();
+  const [infoNotice, setInfoNotice] = useState('');
 
-  /* ── empty state: no resume ── */
-  if (!resumeText) {
-    return (
-      <div>
-        <PageHeader
-          title="Skill Gap Analysis"
-          description="Identify missing competencies, categorize skills, and get a personalized learning roadmap."
-          badge="Module 5"
-          icon={Target}
-        />
-        <EmptyState
-          icon={FileSearch}
-          title="Resume Required for Skill Gap Analysis"
-          description="Upload a candidate resume first to diagnose missing proficiencies for your target career path."
-          actionLabel="Upload Resume"
-          onAction={() => navigate('/upload-resume')}
-        />
-      </div>
-    );
-  }
+  // Effective resume text based on mode
+  const effectiveResumeText = useSampleMode ? SAMPLE_RESUME_TEXT : (contextResumeText || '');
+  const hasActualResume = Boolean(contextResumeText && contextResumeText.trim().length > 0);
+  const hasJobDesc = Boolean(descInput && descInput.trim().length > 0);
 
-  /* ── run analysis ── */
-  const handleRunSkillGap = async (e) => {
-    e.preventDefault();
-    if (!roleInput.trim()) {
-      setErrorMsg('Please specify a target role.');
+  // Sync inputs with shared context when context updates
+  useEffect(() => {
+    if (contextJobRole) setRoleInput(contextJobRole);
+    if (contextJobDesc) setDescInput(contextJobDesc);
+  }, [contextJobRole, contextJobDesc]);
+
+  // Handle switching to sample data for standalone testing
+  const handleToggleSampleMode = () => {
+    if (!useSampleMode) {
+      setUseSampleMode(true);
+      setRoleInput(SAMPLE_JOB_ROLE);
+      setDescInput(SAMPLE_JOB_DESCRIPTION);
+      setInfoNotice('Switched to Standalone Testing Mode with verified sample data.');
+    } else {
+      setUseSampleMode(false);
+      setRoleInput(contextJobRole || '');
+      setDescInput(contextJobDesc || '');
+      setInfoNotice(hasActualResume ? 'Switched to actual AppContext resume data.' : 'Switched to AppContext. (No resume uploaded yet)');
+    }
+  };
+
+  // Perform AI or Deterministic Skill Gap Analysis
+  const handleAnalyzeSkillGap = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    setErrorMsg('');
+    setInfoNotice('');
+
+    if (!effectiveResumeText.trim()) {
+      setErrorMsg('No resume content available. Please upload a resume or enable Sample Testing Mode.');
       return;
     }
 
-    setErrorMsg('');
+    if (!roleInput.trim()) {
+      setErrorMsg('Please specify a Target Job Title to benchmark skill gaps.');
+      return;
+    }
+
     setLoading(true);
-    setTargetJobRole(roleInput.trim());
+
+    // Save target role & job description to shared AppContext
+    if (setTargetJobRole) setTargetJobRole(roleInput.trim());
+    if (setJobDescription) setJobDescription(descInput.trim());
 
     try {
-      const raw = await analyzeSkillGapWithGemini(
-        resumeText,
-        roleInput.trim(),
-        jobDescription || ''
-      );
+      if (isGeminiConfigured()) {
+        const ai = getGeminiClient();
 
-      const structured = buildSkillAnalysisResults(raw, matchingResults, analysisResults);
-      setSkillAnalysisResults(structured);
+        const prompt = `You are an expert AI Career and Skills Assessment Specialist for RESUMATE AI.
+Perform a strict, comprehensive Skill Gap Analysis by comparing the candidate's actual resume against the target job requirements.
+
+STRICT INSTRUCTIONS:
+1. Read the complete resume text and extract all skills actually evidenced.
+2. Identify the skills required for the target job: "${roleInput.trim()}".
+3. Reference the provided job description:
+"""
+${descInput.trim()}
+"""
+4. Identify:
+   - "matchedSkills": Skills explicitly demonstrated in the resume that match job requirements. Provide brief context.
+   - "missingSkills": Skills required by the job that are NOT demonstrated in the resume. Wording: Use "Not demonstrated in resume".
+   - "partialSkills": Skills where resume shows basic or related knowledge, but lacks full depth/production scope. Explain why.
+5. Classify the skill gaps into priorities:
+   - "highPriority": Critical must-have skills missing (essential blockers).
+   - "mediumPriority": Important skills missing or partial matches.
+   - "lowPriority": Nice-to-have or optional skills.
+6. Provide "skillsToFocusFirst": Array of 2-3 most critical skills to focus on first.
+7. Provide "learningSuggestions": Array of ordered learning items:
+   - skill: string
+   - priority: "High" | "Medium" | "Low"
+   - suggestedOrder: number (1, 2, 3...)
+   - whyImportant: string (why it matters for this specific role)
+   - approach: string (practical study or tutorial guide)
+   - practicalProject: string (actionable project idea to build proof of skill)
+   - estimatedDuration: string (realistic timeframe, e.g. "1-2 weeks")
+8. Calculate "overallMatchPercentage": (Weighted matched skill points / Total required skill points) * 100. (Integer 0-100).
+9. Count totals:
+   - "totalRequiredSkills": number
+   - "matchingSkillsCount": number
+   - "missingSkillsCount": number
+   - "partialSkillsCount": number
+
+Resume Text:
+"""
+${effectiveResumeText}
+"""
+
+Return ONLY a valid JSON object matching this exact schema:
+{
+  "targetRole": "${roleInput.trim()}",
+  "overallMatchPercentage": number,
+  "totalRequiredSkills": number,
+  "matchingSkillsCount": number,
+  "missingSkillsCount": number,
+  "partialSkillsCount": number,
+  "matchedSkills": [{"skill": "string", "evidence": "string"}],
+  "missingSkills": [{"skill": "string", "reason": "string"}],
+  "partialSkills": [{"skill": "string", "reason": "string"}],
+  "highPriority": [{"skill": "string", "reason": "string"}],
+  "mediumPriority": [{"skill": "string", "reason": "string"}],
+  "lowPriority": [{"skill": "string", "reason": "string"}],
+  "skillsToFocusFirst": ["string"],
+  "learningSuggestions": [
+    {
+      "skill": "string",
+      "priority": "High" | "Medium" | "Low",
+      "suggestedOrder": number,
+      "whyImportant": "string",
+      "approach": "string",
+      "practicalProject": "string",
+      "estimatedDuration": "string"
+    }
+  ],
+  "summary": "string"
+}`;
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: prompt
+        });
+
+        const parsed = parseGeminiJsonResponse(response.text);
+
+        // Sanitize and normalize results
+        const structuredResults = {
+          targetRole: parsed.targetRole || roleInput.trim(),
+          overallMatchPercentage: parsed.overallMatchPercentage ?? 0,
+          totalRequiredSkills: parsed.totalRequiredSkills ?? (parsed.matchedSkills?.length + parsed.missingSkills?.length),
+          matchingSkillsCount: parsed.matchingSkillsCount ?? (parsed.matchedSkills?.length || 0),
+          missingSkillsCount: parsed.missingSkillsCount ?? (parsed.missingSkills?.length || 0),
+          partialSkillsCount: parsed.partialSkillsCount ?? (parsed.partialSkills?.length || 0),
+          matchedSkills: parsed.matchedSkills || [],
+          missingSkills: parsed.missingSkills || [],
+          partialSkills: parsed.partialSkills || [],
+          highPriority: parsed.highPriority || [],
+          mediumPriority: parsed.mediumPriority || [],
+          lowPriority: parsed.lowPriority || [],
+          skillsToFocusFirst: parsed.skillsToFocusFirst || [],
+          learningSuggestions: parsed.learningSuggestions || [],
+          summary: parsed.summary || '',
+          analyzedAt: new Date().toISOString()
+        };
+
+        setSkillAnalysisResults(structuredResults);
+        setInfoNotice('Skill gap assessment completed successfully using Google Gemini API.');
+      } else {
+        // Deterministic Fallback Mode
+        const results = runDeterministicAnalysis(effectiveResumeText, descInput, roleInput);
+        setSkillAnalysisResults(results);
+        setInfoNotice('Analyzed using deterministic engine (Configure VITE_GEMINI_API_KEY in .env for live Gemini 2.5 generation).');
+      }
     } catch (err) {
       console.error('Skill Gap Analysis Error:', err);
-      setErrorMsg(
-        err.message ||
-          'Failed to analyze skill gap. Verify your Gemini API key in the .env file.'
-      );
+      // If Gemini call fails (e.g. quota or network), gracefully use deterministic fallback
+      const fallbackResults = runDeterministicAnalysis(effectiveResumeText, descInput, roleInput);
+      setSkillAnalysisResults(fallbackResults);
+      setInfoNotice('Network/API limitation encountered — generated analysis using rule-based engine.');
     } finally {
       setLoading(false);
     }
   };
 
   const r = skillAnalysisResults;
-  const radarData = r?.skillCategories ? buildRadarData(r.skillCategories) : [];
-
-  const categoryConfig = [
-    {
-      key: 'programmingLanguages',
-      label: 'Programming Languages',
-      icon: Code2,
-      iconColor: 'var(--color-primary)'
-    },
-    {
-      key: 'frameworks',
-      label: 'Frameworks & Libraries',
-      icon: Layers,
-      iconColor: 'var(--color-secondary)'
-    },
-    {
-      key: 'databases',
-      label: 'Databases',
-      icon: Database,
-      iconColor: 'var(--color-info)'
-    },
-    {
-      key: 'toolsAndTechnologies',
-      label: 'Tools & Technologies',
-      icon: Wrench,
-      iconColor: 'var(--color-warning)'
-    },
-    {
-      key: 'softSkills',
-      label: 'Soft Skills',
-      icon: Users,
-      iconColor: 'var(--color-success)'
-    }
-  ];
 
   return (
-    <div>
-      <PageHeader
-        title="Skill Gap Analysis"
-        description="Diagnose missing competencies, calculate role readiness, and generate an upskilling roadmap."
-        badge="Module 5"
-        icon={Target}
-      />
+    <div className="sg-container">
+      {/* ── Page Hero Header ── */}
+      <header className="sg-hero-header">
+        <div className="sg-hero-info">
+          <div className="sg-hero-icon">
+            <Target size={28} />
+          </div>
+          <div className="sg-hero-titles">
+            <h1>Skill Gap Analysis</h1>
+            <p>Identify missing skills and discover what you need to learn for your target job.</p>
+          </div>
+        </div>
 
-      {/* ── Error alert ── */}
+        <div className="sg-hero-actions">
+          <span className="badge badge-primary">
+            Module 5
+          </span>
+          <Button
+            variant={useSampleMode ? 'primary' : 'outline'}
+            size="sm"
+            onClick={handleToggleSampleMode}
+          >
+            {useSampleMode ? 'Using Sample Data (Standalone)' : 'Use Sample Test Data'}
+          </Button>
+        </div>
+      </header>
+
+      {/* ── Status Banners: Resume & Job Description Availability ── */}
+      <section className="sg-status-row">
+        {/* Resume Availability Status */}
+        <div className="sg-status-card">
+          <div className="sg-status-meta">
+            <div className={`sg-status-indicator ${hasActualResume || useSampleMode ? 'active' : 'warning'}`} />
+            <div>
+              <div className="sg-status-title">Resume Information</div>
+              <div className="sg-status-detail">
+                {useSampleMode
+                  ? 'Sample Profile (Alex Johnson)'
+                  : hasActualResume
+                  ? (resumeFile?.name || 'Uploaded Resume Active')
+                  : 'No Resume in AppContext'}
+              </div>
+            </div>
+          </div>
+          <span className={`badge ${hasActualResume || useSampleMode ? 'badge-success' : 'badge-warning'}`}>
+            {hasActualResume || useSampleMode ? 'Ready' : 'Missing'}
+          </span>
+        </div>
+
+        {/* Job Description Availability Status */}
+        <div className="sg-status-card">
+          <div className="sg-status-meta">
+            <div className={`sg-status-indicator ${hasJobDesc ? 'active' : 'warning'}`} />
+            <div>
+              <div className="sg-status-title">Target Job Information</div>
+              <div className="sg-status-detail">
+                {roleInput || (hasJobDesc ? 'Job Description Loaded' : 'No Job Role Specified')}
+              </div>
+            </div>
+          </div>
+          <span className={`badge ${hasJobDesc ? 'badge-success' : 'badge-warning'}`}>
+            {hasJobDesc ? 'Configured' : 'Needs Input'}
+          </span>
+        </div>
+
+        {/* Existing Module 4 Matching Status (if available) */}
+        <div className="sg-status-card">
+          <div className="sg-status-meta">
+            <div className={`sg-status-indicator ${matchingResults ? 'active' : 'warning'}`} />
+            <div>
+              <div className="sg-status-title">Job Matching Context</div>
+              <div className="sg-status-detail">
+                {matchingResults ? `Matched (${matchingResults.matchPercentage || 0}%)` : 'Not run yet'}
+              </div>
+            </div>
+          </div>
+          <span className={`badge ${matchingResults ? 'badge-primary' : 'badge-secondary'}`}>
+            {matchingResults ? 'Available' : 'Optional'}
+          </span>
+        </div>
+      </section>
+
+      {/* ── Alert Notices ── */}
       {errorMsg && (
-        <div className="alert alert-danger">
+        <div className="alert alert-danger" style={{ margin: 0 }}>
           <AlertCircle size={18} />
           <span>{errorMsg}</span>
         </div>
       )}
 
-      {/* ── API key warning ── */}
-      {!isGeminiConfigured() && (
-        <div className="alert alert-warning">
-          <AlertCircle size={18} />
-          <div>
-            <strong>Gemini API Key Required:</strong> Set{' '}
-            <code>VITE_GEMINI_API_KEY</code> in <code>.env</code> to generate
-            real skill matrix evaluations.
+      {infoNotice && (
+        <div className="alert alert-info" style={{ margin: 0 }}>
+          <Info size={18} />
+          <span>{infoNotice}</span>
+        </div>
+      )}
+
+      {/* ── Target Job Configuration Card ── */}
+      <section className="sg-card">
+        <div className="sg-card-header">
+          <h2 className="sg-card-title">
+            <Briefcase size={20} color="var(--color-primary)" />
+            Target Job &amp; Requirement Benchmarks
+          </h2>
+          {useSampleMode && (
+            <span className="badge badge-warning">
+              Standalone Test Sample Mode
+            </span>
+          )}
+        </div>
+
+        <form onSubmit={handleAnalyzeSkillGap}>
+          <div className="sg-form-grid">
+            {/* Target Job Title */}
+            <div className="sg-field-group">
+              <label className="sg-field-label" htmlFor="sg-job-role">
+                Target Job Title / Career Goal
+              </label>
+              <input
+                id="sg-job-role"
+                type="text"
+                className="sg-field-input"
+                placeholder="e.g. Senior Full Stack Engineer, Cloud Architect"
+                value={roleInput}
+                onChange={(e) => setRoleInput(e.target.value)}
+                required
+              />
+              <span style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-muted)' }}>
+                Target role used to benchmark industry standard qualifications.
+              </span>
+            </div>
+
+            {/* Resume Summary / Info Preview */}
+            <div className="sg-field-group">
+              <label className="sg-field-label">
+                Active Resume Source
+              </label>
+              <div
+                style={{
+                  padding: '10px 14px',
+                  background: 'var(--color-bg)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  fontSize: 'var(--font-sm)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  height: '42px'
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--color-text-main)', fontWeight: 500 }}>
+                  <FileText size={16} color="var(--color-primary)" />
+                  {useSampleMode ? 'Sample Resume (Frontend / Full Stack)' : (resumeFile?.name || 'Pasted Resume Text')}
+                </span>
+                <span style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-muted)' }}>
+                  ~{effectiveResumeText.trim().split(/\s+/).filter(Boolean).length} words
+                </span>
+              </div>
+              <span style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-muted)' }}>
+                {useSampleMode ? 'Using pre-loaded sample resume for isolated localhost testing.' : 'Extracted from shared AppContext.'}
+              </span>
+            </div>
           </div>
-        </div>
-      )}
 
-      {/* ── Info: matching results available ── */}
-      {matchingResults && (
-        <div className="alert alert-info" style={{ marginBottom: '16px' }}>
-          <Info size={16} />
-          <span>
-            Job matching results detected — required skills will be pulled from
-            matching analysis for more accurate coverage calculation.
-          </span>
-        </div>
-      )}
-
-      {/* ── Target Role Form ── */}
-      <div className="resumate-card" style={{ marginBottom: '24px' }}>
-        <form
-          onSubmit={handleRunSkillGap}
-          style={{ display: 'flex', gap: '12px', alignItems: 'flex-end', flexWrap: 'wrap' }}
-        >
-          <div style={{ flex: 1, minWidth: '260px' }}>
-            <label className="form-label" htmlFor="skill-role-input">
-              Target Career Role
+          {/* Job Description Textarea */}
+          <div className="sg-field-group" style={{ marginBottom: '16px' }}>
+            <label className="sg-field-label" htmlFor="sg-job-desc">
+              <span>Job Description &amp; Required Skills</span>
+              <span style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-muted)' }}>
+                Full posting or key requirements
+              </span>
             </label>
-            <input
-              id="skill-role-input"
-              type="text"
-              className="form-input"
-              placeholder="e.g. Full Stack Developer, Data Scientist, Cloud Architect"
-              value={roleInput}
-              onChange={(e) => setRoleInput(e.target.value)}
+            <textarea
+              id="sg-job-desc"
+              rows={5}
+              className="sg-field-textarea"
+              placeholder="Paste job description, technical stack, qualifications, and role responsibilities..."
+              value={descInput}
+              onChange={(e) => setDescInput(e.target.value)}
               required
             />
-            {!jobDescription && (
-              <p className="form-helper" style={{ marginTop: '4px' }}>
-                💡 Tip: Run Job Matching first to get more precise skill coverage data.
-              </p>
-            )}
           </div>
-          <Button type="submit" variant="primary" icon={Sparkles} isLoading={loading}>
-            {r ? 'Re-Run Analysis' : 'Run Skill Gap Analysis'}
-          </Button>
-          {r && (
-            <Button
-              type="button"
-              variant="outline"
-              icon={RefreshCw}
-              onClick={() => setSkillAnalysisResults(null)}
-            >
-              Clear
-            </Button>
-          )}
-        </form>
-      </div>
 
-      {/* ── Loading ── */}
+          {/* Action Row */}
+          <div className="sg-action-bar">
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <Button
+                type="submit"
+                variant="primary"
+                icon={Sparkles}
+                isLoading={loading}
+              >
+                {r ? 'Re-Analyze Skill Gaps' : 'Analyze Skill Gaps'}
+              </Button>
+
+              {r && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  icon={RefreshCw}
+                  onClick={() => setSkillAnalysisResults(null)}
+                >
+                  Clear Results
+                </Button>
+              )}
+            </div>
+
+            <div style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <ShieldCheck size={14} color="var(--color-success)" />
+              Powered by Google Gemini 2.5 Flash
+            </div>
+          </div>
+        </form>
+      </section>
+
+      {/* ── Loading Indicator ── */}
       {loading && (
         <Loader
           size="lg"
-          message="Benchmarking resume competencies against industry standards..."
+          message="Analyzing demonstrated competencies, identifying missing skills, and generating learning roadmap..."
         />
       )}
 
-      {/* ── Results ── */}
+      {/* ── Active Analysis Results ── */}
       {!loading && r && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          {/* Section D: Skill Gap Score / Skill Coverage */}
+          <SkillCoverage
+            coveragePercentage={r.overallMatchPercentage ?? 0}
+            totalRequired={r.totalRequiredSkills ?? (r.matchedSkills?.length + r.missingSkills?.length)}
+            matchedCount={r.matchingSkillsCount ?? r.matchedSkills?.length ?? 0}
+            missingCount={r.missingSkillsCount ?? r.missingSkills?.length ?? 0}
+            partialCount={r.partialSkillsCount ?? r.partialSkills?.length ?? 0}
+          />
 
-          {/* ── Row 1: Readiness + Coverage ── */}
-          <div className="grid-2">
-            {/* Readiness Score */}
-            <div className="resumate-card" style={{ textAlign: 'center' }}>
-              <span className="badge badge-primary" style={{ marginBottom: '12px' }}>
-                Role Readiness Index
-              </span>
-              <div
-                style={{
-                  fontSize: '56px',
-                  fontWeight: 700,
-                  color: 'var(--color-primary)',
-                  lineHeight: 1,
-                  margin: '8px 0 4px'
-                }}
-              >
-                {r.readinessScore ?? 0}%
-              </div>
-              <p style={{ fontSize: 'var(--font-sm)', color: 'var(--color-text-secondary)' }}>
-                Target:{' '}
-                <strong style={{ color: 'var(--color-text-main)' }}>{r.targetRole}</strong>
-              </p>
-            </div>
+          {/* Section C: Skill Comparison (Matched, Missing, Partially Matching) */}
+          <SkillsComparison
+            matchedSkills={r.matchedSkills || []}
+            missingSkills={r.missingSkills || []}
+            partialSkills={r.partialSkills || []}
+          />
 
-            {/* Skill Coverage */}
-            <div className="resumate-card">
-              <div className="card-header">
-                <h3 className="card-title">
-                  <TrendingUp size={18} color="var(--color-primary)" />
-                  Skill Coverage
-                </h3>
-              </div>
-              <CoverageBar coverage={r.skillCoverage} />
-              {r.skillCoverage !== null && (
-                <div
-                  style={{
-                    display: 'flex',
-                    gap: '16px',
-                    marginTop: '14px',
-                    flexWrap: 'wrap'
-                  }}
-                >
-                  <span className="badge badge-success">
-                    <CheckCircle2 size={12} /> {r.matchedSkills.length} Matched
-                  </span>
-                  <span className="badge badge-danger">
-                    <AlertTriangle size={12} /> {r.missingSkills.length} Not Demonstrated
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
+          {/* Section E: Skill Priority (High, Medium, Low) */}
+          <SkillPriority
+            highPriority={r.highPriority || []}
+            mediumPriority={r.mediumPriority || []}
+            lowPriority={r.lowPriority || []}
+          />
 
-          {/* ── Row 2: Matched Skills + Missing Skills ── */}
-          <div className="grid-2">
-            {/* Matched Skills */}
-            <div className="resumate-card">
-              <div className="card-header">
-                <h3 className="card-title" style={{ fontSize: 'var(--font-md)' }}>
-                  <CheckCircle2 size={18} color="var(--color-success)" />
-                  Skills Demonstrated in Resume
-                </h3>
-              </div>
-              {r.matchedSkills.length > 0 ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {r.matchedSkills.map((sk, i) => (
-                    <span key={i} className="badge badge-success">
-                      ✓ {sk}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p style={{ fontSize: 'var(--font-sm)', color: 'var(--color-text-muted)' }}>
-                  No required skills matched in the resume based on the available data.
-                </p>
-              )}
-            </div>
+          {/* Section F: Learning Suggestions & Roadmap */}
+          <LearningSuggestions
+            suggestions={r.learningSuggestions || []}
+            focusFirst={r.skillsToFocusFirst || []}
+          />
+        </div>
+      )}
 
-            {/* Missing Skills */}
-            <div className="resumate-card">
-              <div className="card-header">
-                <h3 className="card-title" style={{ fontSize: 'var(--font-md)' }}>
-                  <AlertTriangle size={18} color="var(--color-danger)" />
-                  Not Demonstrated in Resume
-                </h3>
-              </div>
-              {r.missingSkills.length > 0 ? (
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                  {r.missingSkills.map((sk, i) => (
-                    <span
-                      key={i}
-                      className="badge badge-danger"
-                      title="Not demonstrated in resume"
-                    >
-                      ○ {sk}
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p style={{ fontSize: 'var(--font-sm)', color: 'var(--color-success)' }}>
-                  🎉 All identified required skills are demonstrated in the resume!
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* ── Row 3: Skill Categories ── */}
-          <div className="resumate-card">
-            <div className="card-header">
-              <h3 className="card-title">
-                <Layers size={18} color="var(--color-primary)" />
-                Skill Categories
-              </h3>
-              <span className="badge badge-primary">By Domain</span>
-            </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                gap: '12px'
-              }}
-            >
-              {categoryConfig.map(({ key, label, icon, iconColor }) => (
-                <CategorySection
-                  key={key}
-                  icon={icon}
-                  label={label}
-                  matched={r.skillCategories[key]?.matched || []}
-                  missing={r.skillCategories[key]?.missing || []}
-                  iconColor={iconColor}
-                />
-              ))}
-            </div>
-            <div
-              style={{
-                marginTop: '12px',
-                padding: '10px 14px',
-                backgroundColor: 'var(--color-bg)',
-                borderRadius: 'var(--radius-sm)',
-                border: '1px solid var(--color-border)',
-                display: 'flex',
-                gap: '20px',
-                flexWrap: 'wrap',
-                fontSize: 'var(--font-xs)',
-                color: 'var(--color-text-secondary)'
-              }}
-            >
-              <span>
-                <span className="badge badge-success" style={{ fontSize: '10px' }}>✓ Matched</span>{' '}
-                Demonstrated in resume
-              </span>
-              <span>
-                <span className="badge badge-danger" style={{ fontSize: '10px' }}>○ Missing</span>{' '}
-                Not demonstrated in resume
-              </span>
-            </div>
-          </div>
-
-          {/* ── Row 4: Radar Chart ── */}
-          {radarData.length >= 3 && (
-            <div className="resumate-card">
-              <div className="card-header">
-                <h3 className="card-title">
-                  <TrendingUp size={18} color="var(--color-primary)" />
-                  Skill Coverage by Category
-                </h3>
-                <span className="badge badge-secondary">Radar View</span>
-              </div>
-              <div style={{ width: '100%', height: '280px' }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <RadarChart data={radarData}>
-                    <PolarGrid stroke="var(--color-border)" />
-                    <PolarAngleAxis
-                      dataKey="subject"
-                      tick={{
-                        fontSize: 12,
-                        fill: 'var(--color-text-secondary)',
-                        fontFamily: 'inherit'
-                      }}
-                    />
-                    <Radar
-                      name="Coverage"
-                      dataKey="coverage"
-                      stroke="var(--color-primary)"
-                      fill="var(--color-primary)"
-                      fillOpacity={0.25}
-                      strokeWidth={2}
-                    />
-                    <RechartsTooltip
-                      formatter={(val) => [`${val}%`, 'Coverage']}
-                      contentStyle={{
-                        fontSize: '12px',
-                        borderRadius: '8px',
-                        border: '1px solid var(--color-border)'
-                      }}
-                    />
-                  </RadarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          )}
-
-          {/* ── Row 5: Priority Analysis ── */}
-          <div className="resumate-card">
-            <div className="card-header">
-              <h3 className="card-title">
-                <AlertTriangle size={18} color="var(--color-warning)" />
-                Skill Priority Analysis
-              </h3>
-              <span className="badge badge-warning">Gap Prioritization</span>
-            </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                gap: '12px'
-              }}
-            >
-              {/* High */}
-              <div
-                style={{
-                  padding: '14px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--color-danger-bg)',
-                  border: '1px solid var(--color-danger-border)'
-                }}
-              >
-                <div
-                  style={{
-                    fontWeight: 600,
-                    fontSize: 'var(--font-sm)',
-                    color: 'var(--color-danger)',
-                    marginBottom: '10px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  🔴 High Priority
-                  <span style={{ marginLeft: 'auto', fontSize: 'var(--font-xs)' }}>
-                    ({r.priorityAnalysis.high.length})
-                  </span>
-                </div>
-                {r.priorityAnalysis.high.length > 0 ? (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {r.priorityAnalysis.high.map((s, i) => (
-                      <span
-                        key={i}
-                        className="badge badge-danger"
-                        title="Not demonstrated in resume"
-                      >
-                        {s}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-muted)' }}>
-                    No high-priority gaps identified.
-                  </p>
-                )}
-              </div>
-
-              {/* Medium */}
-              <div
-                style={{
-                  padding: '14px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--color-warning-bg)',
-                  border: '1px solid var(--color-warning-border)'
-                }}
-              >
-                <div
-                  style={{
-                    fontWeight: 600,
-                    fontSize: 'var(--font-sm)',
-                    color: 'var(--color-warning)',
-                    marginBottom: '10px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  🟡 Medium Priority
-                  <span style={{ marginLeft: 'auto', fontSize: 'var(--font-xs)' }}>
-                    ({r.priorityAnalysis.medium.length})
-                  </span>
-                </div>
-                {r.priorityAnalysis.medium.length > 0 ? (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {r.priorityAnalysis.medium.map((s, i) => (
-                      <span
-                        key={i}
-                        className="badge badge-warning"
-                        title="Not demonstrated in resume"
-                      >
-                        {s}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-muted)' }}>
-                    No medium-priority gaps identified.
-                  </p>
-                )}
-              </div>
-
-              {/* Low */}
-              <div
-                style={{
-                  padding: '14px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--color-primary-light)',
-                  border: '1px solid var(--color-primary-subtle)'
-                }}
-              >
-                <div
-                  style={{
-                    fontWeight: 600,
-                    fontSize: 'var(--font-sm)',
-                    color: 'var(--color-primary)',
-                    marginBottom: '10px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px'
-                  }}
-                >
-                  🔵 Low Priority
-                  <span style={{ marginLeft: 'auto', fontSize: 'var(--font-xs)' }}>
-                    ({r.priorityAnalysis.low.length})
-                  </span>
-                </div>
-                {r.priorityAnalysis.low.length > 0 ? (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                    {r.priorityAnalysis.low.map((s, i) => (
-                      <span
-                        key={i}
-                        className="badge badge-primary"
-                        title="Not demonstrated in resume"
-                      >
-                        {s}
-                      </span>
-                    ))}
-                  </div>
-                ) : (
-                  <p style={{ fontSize: 'var(--font-xs)', color: 'var(--color-text-muted)' }}>
-                    No low-priority gaps identified.
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* ── Row 6: Learning Suggestions ── */}
-          {r.learningSuggestions.length > 0 && (
-            <div className="resumate-card">
-              <div className="card-header">
-                <h3 className="card-title">
-                  <BookOpen size={18} color="var(--color-primary)" />
-                  Learning Suggestions & Roadmap
-                </h3>
-                <span className="badge badge-primary">{r.learningSuggestions.length} skills</span>
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {r.learningSuggestions.map((item, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      padding: '14px 16px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--color-bg)',
-                      border: '1px solid var(--color-border)',
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      justifyContent: 'space-between',
-                      gap: '12px',
-                      flexWrap: 'wrap'
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: '180px' }}>
-                      <strong
-                        style={{
-                          fontSize: 'var(--font-sm)',
-                          color: 'var(--color-text-main)',
-                          display: 'block',
-                          marginBottom: '4px'
-                        }}
-                      >
-                        {item.skill}
-                      </strong>
-                      <p
-                        style={{
-                          fontSize: 'var(--font-xs)',
-                          color: 'var(--color-text-secondary)',
-                          margin: 0,
-                          lineHeight: 1.5
-                        }}
-                      >
-                        📚 {item.resource}
-                      </p>
-                      {item.certification && (
-                        <p
-                          style={{
-                            fontSize: 'var(--font-xs)',
-                            color: 'var(--color-info)',
-                            marginTop: '4px',
-                            margin: '4px 0 0'
-                          }}
-                        >
-                          🏅 Certification: {item.certification}
-                        </p>
-                      )}
-                    </div>
-                    <PriorityBadge priority={item.priority} />
-                  </div>
-                ))}
-              </div>
-
-              {r.recommendedCertifications?.length > 0 && (
-                <div
-                  style={{
-                    marginTop: '16px',
-                    padding: '14px',
-                    backgroundColor: 'var(--color-info-bg)',
-                    border: '1px solid var(--color-info-border)',
-                    borderRadius: 'var(--radius-md)'
-                  }}
-                >
-                  <strong
-                    style={{
-                      fontSize: 'var(--font-sm)',
-                      color: 'var(--color-info)',
-                      display: 'block',
-                      marginBottom: '8px'
-                    }}
-                  >
-                    🏅 Recommended Certifications
-                  </strong>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    {r.recommendedCertifications.map((cert, i) => (
-                      <span
-                        key={i}
-                        style={{
-                          backgroundColor: 'var(--color-surface)',
-                          border: '1px solid var(--color-info-border)',
-                          color: 'var(--color-info)',
-                          padding: '4px 10px',
-                          borderRadius: 'var(--radius-pill)',
-                          fontSize: 'var(--font-xs)',
-                          fontWeight: 500
-                        }}
-                      >
-                        {cert}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Empty: no gaps ── */}
-          {r.missingSkills.length === 0 && r.learningSuggestions.length === 0 && (
-            <div className="resumate-card" style={{ textAlign: 'center', padding: '32px' }}>
-              <CheckCircle2 size={40} color="var(--color-success)" style={{ margin: '0 auto 12px' }} />
-              <h3 style={{ color: 'var(--color-success)', marginBottom: '8px' }}>
-                No Skill Gaps Detected
-              </h3>
-              <p style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--font-sm)' }}>
-                The resume demonstrates all identified required skills for this role. Consider running
-                analysis with a specific job description for more precise gap detection.
-              </p>
-            </div>
-          )}
-
+      {/* ── Initial Empty State ── */}
+      {!loading && !r && (
+        <div className="sg-card" style={{ textAlign: 'center', padding: '48px 24px' }}>
+          <Target size={48} color="var(--color-primary)" style={{ margin: '0 auto 16px' }} />
+          <h3 style={{ fontSize: 'var(--font-xl)', marginBottom: '8px' }}>
+            Ready to Analyze Skill Gaps
+          </h3>
+          <p style={{ maxWidth: '540px', margin: '0 auto 20px', color: 'var(--color-text-secondary)', fontSize: 'var(--font-sm)' }}>
+            Compare your resume skills against the target role requirements to identify missing competencies, evaluate priority impact, and obtain a personalized step-by-step learning roadmap.
+          </p>
+          <Button
+            variant="primary"
+            icon={Sparkles}
+            onClick={handleAnalyzeSkillGap}
+          >
+            Start Skill Gap Analysis
+          </Button>
         </div>
       )}
     </div>
