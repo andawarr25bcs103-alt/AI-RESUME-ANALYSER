@@ -6,7 +6,12 @@ import {
   signOut,
   sendPasswordResetEmail,
   updateProfile,
-  onAuthStateChanged
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence
 } from 'firebase/auth';
 
 /**
@@ -37,26 +42,35 @@ export const isFirebaseConfigured = () => {
 // Initialize Firebase App gracefully
 let app;
 let auth;
+let googleProvider;
 
 if (isFirebaseConfigured()) {
   app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
   auth = getAuth(app);
+  googleProvider = new GoogleAuthProvider();
+  googleProvider.setCustomParameters({ prompt: 'select_account' });
 } else {
   console.warn(
     '[ResuMate AI] Firebase environment variables are missing or unconfigured. ' +
     'Please configure your .env file using .env.example.'
   );
-  // Dummy auth reference to prevent null crashes before setup
   auth = null;
+  googleProvider = null;
 }
 
 export {
   app,
   auth,
+  googleProvider,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
   updateProfile,
-  onAuthStateChanged
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence
 };

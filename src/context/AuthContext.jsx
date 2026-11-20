@@ -1,13 +1,18 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import {
   auth,
+  googleProvider,
   isFirebaseConfigured,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
   sendPasswordResetEmail,
   updateProfile,
-  onAuthStateChanged
+  onAuthStateChanged,
+  signInWithPopup,
+  setPersistence,
+  browserLocalPersistence,
+  browserSessionPersistence
 } from '../services/firebase';
 
 const AuthContext = createContext(null);
@@ -66,8 +71,9 @@ export const AuthProvider = ({ children }) => {
 
   /**
    * Sign in an existing user with Email and Password
+   * Optionally configures session persistence based on rememberMe toggle
    */
-  const login = async (email, password) => {
+  const login = async (email, password, rememberMe = true) => {
     setError(null);
     if (!isConfigured || !auth) {
       throw new Error(
@@ -76,10 +82,38 @@ export const AuthProvider = ({ children }) => {
     }
 
     try {
+      if (setPersistence && browserLocalPersistence && browserSessionPersistence) {
+        await setPersistence(
+          auth,
+          rememberMe ? browserLocalPersistence : browserSessionPersistence
+        );
+      }
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       return userCredential.user;
     } catch (err) {
       setError(err.message);
+      throw err;
+    }
+  };
+
+  /**
+   * Sign in with Google via popup
+   */
+  const loginWithGoogle = async () => {
+    setError(null);
+    if (!isConfigured || !auth || !googleProvider) {
+      throw new Error(
+        'Firebase Authentication or Google Sign-In is not configured. Please check your .env file and Firebase console.'
+      );
+    }
+
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      return result.user;
+    } catch (err) {
+      if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+        setError(err.message);
+      }
       throw err;
     }
   };
@@ -123,12 +157,16 @@ export const AuthProvider = ({ children }) => {
   };
 
   const value = {
+    // Both user and currentUser are provided for maximum compatibility
     currentUser,
+    user: currentUser,
+    isAuthenticated: Boolean(currentUser),
     loading,
     error,
     isConfigured,
     register,
     login,
+    loginWithGoogle,
     logout,
     resetPassword
   };
@@ -143,3 +181,5 @@ export const useAuth = () => {
   }
   return context;
 };
+
+export default AuthContext;
