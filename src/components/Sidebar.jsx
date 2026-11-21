@@ -11,17 +11,21 @@ import {
   RotateCcw,
   CheckCircle,
   AlertCircle,
+  LogOut,
   X
 } from 'lucide-react';
 import { useApp } from '../context/AppContext';
+import { useAuth } from '../context/AuthContext';
 import Button from './Button';
 
 /**
  * Sidebar Navigation Component
- * Provides direct links to all 7 modules and tracks active resume state.
+ * Provides direct links to all 7 modules, tracks active resume state,
+ * and displays active user session with quick logout option.
  */
 export const Sidebar = ({ isOpen, onClose }) => {
   const { resumeFile, resumeText, resetAnalysis } = useApp();
+  const { currentUser, logout } = useAuth();
   const navigate = useNavigate();
 
   const navLinks = [
@@ -40,6 +44,31 @@ export const Sidebar = ({ isOpen, onClose }) => {
       navigate('/upload-resume');
       if (onClose) onClose();
     }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+      if (onClose) onClose();
+      navigate('/login');
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+  };
+
+  const getInitials = (name, email) => {
+    if (name) {
+      return name
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2);
+    }
+    if (email) {
+      return email.slice(0, 2).toUpperCase();
+    }
+    return 'U';
   };
 
   return (
@@ -145,6 +174,46 @@ export const Sidebar = ({ isOpen, onClose }) => {
               </div>
             )}
           </div>
+
+          {/* User Session & Logout in Sidebar */}
+          {currentUser && (
+            <div
+              style={{
+                marginTop: '10px',
+                padding: '10px',
+                background: 'var(--color-bg)',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--color-border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                <div className="user-avatar" style={{ width: '28px', height: '28px', fontSize: '11px' }}>
+                  {getInitials(currentUser.displayName, currentUser.email)}
+                </div>
+                <div style={{ minWidth: 0, overflow: 'hidden' }}>
+                  <p style={{ fontSize: '12px', fontWeight: 600, margin: 0, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                    {currentUser.displayName || 'User'}
+                  </p>
+                  <p style={{ fontSize: '10px', color: 'var(--color-text-muted)', margin: 0, textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                    {currentUser.email}
+                  </p>
+                </div>
+              </div>
+
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={LogOut}
+                onClick={handleLogout}
+                title="Sign Out"
+                style={{ padding: '6px' }}
+              />
+            </div>
+          )}
         </div>
       </aside>
     </>
