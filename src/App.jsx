@@ -1,5 +1,6 @@
 
 import React from 'react';
+
 import {
   BrowserRouter,
   Routes,
@@ -13,71 +14,74 @@ import { AppProvider } from './context/AppContext';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 
-// Authentication Module
+// Module 1: Authentication
 import LoginPage from './modules/auth/LoginPage';
 import RegisterPage from './modules/auth/RegisterPage';
 import ForgotPasswordPage from './modules/auth/ForgotPasswordPage';
 
-// Resume Upload Module
+// Module 2: Resume Upload
 import ResumeUploadPage from './modules/resume-upload/ResumeUploadPage';
-import StandaloneUploadApp from './modules/resume-upload/StandaloneUploadApp';
 
-// AI Analysis Module
+// Module 3: AI Resume Analysis
 import AiAnalysisPage from './modules/ai-analysis/AiAnalysisPage';
 
-// Job Matching Module
+// Module 4: Job Matching
 import JobMatchingPage from './modules/job-matching/JobMatchingPage';
 
-// Skill Gap Analysis Module
+// Module 5: Skill Gap Analysis
 import SkillGapPage from './modules/skill-gap/SkillGapPage';
 
-// Improvement Suggestions Module
-import ImprovementSuggestionsPage from './modules/improvement-suggestions/ImprovementSuggestionsPage';
+// Module 6: Resume Improvement
+import ResumeImprovementPage from './modules/resume-improvement/ResumeImprovementPage';
 
-// Dashboard & Reports Module
-import DashboardReportPage from './modules/dashboard-report/DashboardReportPage';
+// Module 7: Dashboard & Reports
 import DashboardPage from './modules/dashboard-reports/DashboardPage';
 import ReportsPage from './modules/dashboard-reports/ReportsPage';
 import LandingPage from './modules/dashboard-reports/LandingPage';
 
-// Standalone Module 2 Configuration
-const STANDALONE_MODULE_2 = false;
+/*
+=========================================================
+DEVELOPMENT CONFIGURATION
+
+true  = Run ONLY Module 3 - AI Resume Analysis
+false = Run complete integrated application
+
+=========================================================
+*/
+
+const ISOLATE_MODULE_3 = false;
 
 function App() {
 
-  // Standalone Resume Upload Development Mode
-  if (STANDALONE_MODULE_2) {
+  // Standalone AI Analysis Development Mode
+  if (ISOLATE_MODULE_3) {
     return (
       <AppProvider>
-        <StandaloneUploadApp />
+        <AiAnalysisPage />
       </AppProvider>
     );
   }
 
-  // Complete Team Application
+  // Complete Integrated Team Application
   return (
     <BrowserRouter>
       <AuthProvider>
         <AppProvider>
+
           <Routes>
 
-            {/* Main Dashboard */}
+            {/* Landing Page */}
             <Route
               path="/"
-              element={<DashboardReportPage />}
+              element={<LandingPage />}
             />
 
-            <Route
-              path="/dashboard-report"
-              element={<DashboardReportPage />}
-            />
-
-            {/* Public Routes */}
             <Route
               path="/landing"
               element={<LandingPage />}
             />
 
+            {/* Authentication Routes */}
             <Route
               path="/login"
               element={<LoginPage />}
@@ -93,7 +97,7 @@ function App() {
               element={<ForgotPasswordPage />}
             />
 
-            {/* Protected Routes */}
+            {/* Protected Application Routes */}
             <Route
               element={
                 <ProtectedRoute>
@@ -102,42 +106,43 @@ function App() {
               }
             >
 
+              {/* Module 7: Dashboard */}
               <Route
                 path="/dashboard"
                 element={<DashboardPage />}
               />
 
-              {/* Resume Upload Module */}
+              {/* Module 2: Resume Upload */}
               <Route
                 path="/upload-resume"
                 element={<ResumeUploadPage />}
               />
 
-              {/* AI Analysis Module */}
+              {/* Module 3: AI Analysis */}
               <Route
                 path="/ai-analysis"
                 element={<AiAnalysisPage />}
               />
 
-              {/* Job Matching Module */}
+              {/* Module 4: Job Matching */}
               <Route
                 path="/job-matching"
                 element={<JobMatchingPage />}
               />
 
-              {/* Skill Gap Module */}
+              {/* Module 5: Skill Gap Analysis */}
               <Route
                 path="/skill-gap"
                 element={<SkillGapPage />}
               />
 
-              {/* Improvement Suggestions */}
+              {/* Module 6: Resume Improvement */}
               <Route
                 path="/improvements"
-                element={<ImprovementSuggestionsPage />}
+                element={<ResumeImprovementPage />}
               />
 
-              {/* Reports */}
+              {/* Module 7: Reports */}
               <Route
                 path="/reports"
                 element={<ReportsPage />}
@@ -145,13 +150,14 @@ function App() {
 
             </Route>
 
-            {/* 404 Fallback */}
+            {/* Fallback Route */}
             <Route
               path="*"
               element={<Navigate to="/" replace />}
             />
 
           </Routes>
+
         </AppProvider>
       </AuthProvider>
     </BrowserRouter>
